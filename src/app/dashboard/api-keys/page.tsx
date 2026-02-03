@@ -97,7 +97,7 @@ export default function ApiKeysPage() {
         {keys.map((apiKey) => {
           const isRevealed = revealedKeys.has(apiKey.id);
           const displayKey = isRevealed
-            ? "sk_live_a1b2c3d4e5f6g7h8i9j0abc123"
+            ? "sk_test_a1b2c3d4e5f6g7h8i9j0abc123"
             : apiKey.key;
 
           return (
