@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     siteName: "Scalefield",
     images: [
       {
-        url: "/scalefield.svg",
+        url: "scalefield_banner.png",
         width: 1200,
         height: 630,
         alt: "Scalefield",
@@ -40,7 +40,7 @@ export const metadata: Metadata = {
     title: "Scalefield - Scale Your SaaS Without Limits",
     description:
       "Build, deploy, and scale your SaaS applications with ease. Focus on what matters while we handle the infrastructure.",
-    images: ["/scalefield.svg"],
+    images: ["/scalefield_banner.png"],
   },
 };
 
