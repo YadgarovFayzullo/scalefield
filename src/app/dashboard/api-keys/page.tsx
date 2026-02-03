@@ -25,7 +25,7 @@ export default function ApiKeysPage() {
     {
       id: "1",
       name: "Production Key",
-      key: "sk_live_***************abc123",
+      key: "sk_test_***************abc123",
       environment: "production",
       created: "2 months ago",
       lastUsed: "5 min ago",
