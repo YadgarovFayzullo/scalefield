@@ -18,81 +18,21 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   DashboardSquare02Icon,
-  Folder01Icon,
   GroupLayersIcon,
   ChartLineData01Icon,
-  Settings05Icon,
   FileScriptIcon,
-  LinkSquare02Icon,
-  UserMultiple02Icon,
   Activity03Icon,
-  Invoice01Icon,
-  LockPasswordIcon,
   EditTableIcon,
 } from "@hugeicons/core-free-icons";
 
 // Navigation items with hugeicons
 const navItems = [
-  {
-    title: "Overview",
-    href: "/dashboard",
-    icon: DashboardSquare02Icon,
-  },
-  {
-    title: "Table Editor",
-    href: "/dashboard/database",
-    icon: EditTableIcon,
-  },
-  {
-    title: "Projects",
-    href: "/dashboard/projects",
-    icon: Folder01Icon,
-  },
-  {
-    title: "Deployments",
-    href: "/dashboard/deployments",
-    icon: GroupLayersIcon,
-  },
-  {
-    title: "Analytics",
-    href: "/dashboard/analytics",
-    icon: ChartLineData01Icon,
-  },
-  {
-    title: "Monitoring",
-    href: "/dashboard/monitoring",
-    icon: Activity03Icon,
-  },
-  {
-    title: "Logs",
-    href: "/dashboard/logs",
-    icon: FileScriptIcon,
-  },
-  {
-    title: "Webhooks",
-    href: "/dashboard/webhooks",
-    icon: LinkSquare02Icon,
-  },
-  {
-    title: "API Keys",
-    href: "/dashboard/api-keys",
-    icon: LockPasswordIcon,
-  },
-  {
-    title: "Team",
-    href: "/dashboard/team",
-    icon: UserMultiple02Icon,
-  },
-  {
-    title: "Billing",
-    href: "/dashboard/billing",
-    icon: Invoice01Icon,
-  },
-  {
-    title: "Settings",
-    href: "/dashboard/settings",
-    icon: Settings05Icon,
-  },
+  { title: "Overview", href: "/dashboard", icon: DashboardSquare02Icon },
+  { title: "Deployments", href: "/dashboard/deployments", icon: GroupLayersIcon },
+  { title: "Monitoring", href: "/dashboard/monitoring", icon: Activity03Icon },
+  { title: "Analytics", href: "/dashboard/analytics", icon: ChartLineData01Icon },
+  { title: "Logs", href: "/dashboard/logs", icon: FileScriptIcon },
+  { title: "Database", href: "/dashboard/database", icon: EditTableIcon },
 ];
 
 export function AppSidebar() {
@@ -113,7 +53,7 @@ export function AppSidebar() {
           </div>
           <div className="flex flex-col">
             <span className="font-semibold text-lg">Scalefield</span>
-            <span className="text-sm text-muted-foreground">Dashboard</span>
+            <span className="text-sm text-muted-foreground">researcher.uz</span>
           </div>
         </Link>
       </SidebarHeader>

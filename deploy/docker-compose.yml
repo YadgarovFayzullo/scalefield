@@ -1,0 +1,50 @@
+# Стек панели владельца на Timeweb: коллектор метрик (researcher-uz-status/api)
+# + Scalefield (Next.js). Живёт в /opt/apps/status рядом с backend/frontend/traefik.
+#
+# Сети: `edge` — внешняя сеть Traefik (наружу смотрит только web);
+# `backend_internal` — сеть бэкенда, в ней контейнер `db` Postgres (коллектор
+# читает pg_stat_* и контент). Образы собираются на маке под linux/amd64 и
+# заливаются `docker save | ssh docker load` (у сервера 2 ГБ RAM — сборка Next
+# на нём не влезает), см. ../deploy/README.md.
+services:
+  status-api:
+    image: status-api:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DISK_PATH: /host
+      PROC_ROOT: /host/proc
+      CADDY_ACCESS_LOG: /var/log/traefik/access.log
+    volumes:
+      - /proc:/host/proc:ro
+      - /:/host:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log/traefik:/var/log/traefik:ro
+    networks: [backend_internal]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    image: scalefield:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      STATUS_API_URL: http://status-api:8000
+    depends_on: [status-api]
+    networks: [backend_internal, edge]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=edge
+      - traefik.http.routers.status.rule=Host(`status.researcher.uz`)
+      - traefik.http.routers.status.entrypoints=websecure
+      - traefik.http.routers.status.tls.certresolver=le
+      - traefik.http.services.status.loadbalancer.server.port=3000
+
+networks:
+  edge:
+    external: true
+  backend_internal:
+    external: true

@@ -1,18 +1,52 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChartContainer } from "@/components/ui/chart";
-import { Bar, BarChart } from "recharts";
+import { Card, CardContent } from "@/components/ui/card";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  Activity03Icon,
+  AlertCircleIcon,
+  Book02Icon,
+  CpuIcon,
   Database02Icon,
-  LockPasswordIcon,
-  CloudIcon,
-  SignalIcon,
+  Download01Icon,
+  EyeIcon,
+  HardDriveIcon,
+  RefreshIcon,
+  Time01Icon,
+  UserMultipleIcon,
+  ComputerIcon,
 } from "@hugeicons/core-free-icons";
+import {
+  useMetric,
+  fmtBytes,
+  fmtNum,
+  fmtPct,
+  fmtMs,
+  type ApiData,
+  type ContentData,
+  type DatabaseData,
+  type ServerData,
+  type SummaryData,
+} from "@/lib/status";
+import {
+  MetricSection,
+  SectionHeading,
+  StatCard,
+  StatCardSkeleton,
+  pctTone,
+} from "@/components/dashboard/overview-primitives";
+import {
+  ContainersCard,
+  HealthBanner,
+  HealthBannerSkeleton,
+} from "@/components/dashboard/overview-health";
+import {
+  ChartCardSkeleton,
+  GrowthChart,
+  TrafficChart,
+} from "@/components/dashboard/overview-charts";
 
 /**
  * Dashboard Overview Page
@@ -21,321 +55,271 @@ import {
  * This is the ONLY place where cards are allowed
  */
 
-// Mock data for charts - simulating last 60 minutes
-const databaseData = Array.from({ length: 30 }, (_, i) => ({
-  time: i,
-  requests: Math.floor(Math.random() * 15) + 2,
-}));
+/** Re-renders every second so "updated N s ago" keeps counting. */
+function useNow(): number {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
 
-const authData = Array.from({ length: 30 }, (_, i) => ({
-  time: i,
-  requests: i === 15 ? 12 : Math.floor(Math.random() * 2),
-}));
+function fmtSecondsAgo(updatedAt: number | null, now: number): string {
+  if (updatedAt == null) return "—";
+  const s = Math.max(0, Math.floor((now - updatedAt) / 1000));
+  if (s < 60) return `${s}s ago`;
+  return `${Math.floor(s / 60)}m ago`;
+}
 
-const storageData = Array.from({ length: 30 }, (_, i) => ({
-  time: i,
-  requests: i === 18 ? 8 : Math.floor(Math.random() * 2),
-}));
-
-const realtimeData = Array.from({ length: 30 }, (_, i) => ({
-  time: i,
-  requests: 0,
-}));
+function StatRowSkeleton({ count }: { count: number }) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <StatCardSkeleton key={i} />
+      ))}
+    </>
+  );
+}
 
 export default function DashboardPage() {
-  const [timeRange, setTimeRange] = React.useState("60");
+  const summary = useMetric<SummaryData>("summary", 10_000);
+  const server = useMetric<ServerData>("server", 10_000);
+  const database = useMetric<DatabaseData>("database", 30_000);
+  const api = useMetric<ApiData>("api", 60_000);
+  const content = useMetric<ContentData>("content", 60_000);
+
+  const metrics = [summary, server, database, api, content];
+  const anyLoading = metrics.some((m) => m.loading);
+  const lastUpdated = metrics.reduce<number | null>(
+    (acc, m) => (m.updatedAt != null && (acc == null || m.updatedAt > acc) ? m.updatedAt : acc),
+    null
+  );
+  const now = useNow();
+
+  const refreshAll = () => {
+    for (const m of metrics) m.refresh();
+  };
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-      {/* Page header with time selector */}
-      <div className="mb-6 sm:mb-8 flex items-center justify-between">
+      {/* Page header */}
+      <div className="mb-6 sm:mb-8 flex items-center justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold mb-1">Overview</h1>
-          <p className="text-sm text-muted-foreground">System status and recent activity</p>
+          <p className="text-sm text-muted-foreground">researcher.uz platform status</p>
         </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={timeRange}
-            onChange={(e) => setTimeRange(e.target.value)}
-            className="text-sm border border-border rounded-md px-3 py-1.5 bg-background"
-          >
-            <option value="60">Last 60 minutes</option>
-            <option value="24">Last 24 hours</option>
-            <option value="7">Last 7 days</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Stats Cards - Supabase style (EXCEPTION) */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-        {/* Database */}
-        <Card className="border-border">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-            <div className="flex items-center gap-2">
-              <HugeiconsIcon icon={Database02Icon} className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-sm font-medium">Database</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">REST Requests</div>
-              <div className="text-2xl font-semibold">146</div>
-            </div>
-            <ChartContainer
-              config={{
-                requests: {
-                  label: "Requests",
-                  color: "hsl(var(--chart-1))",
-                },
-              }}
-              className="h-20 w-full"
-            >
-              <BarChart data={databaseData}>
-                <Bar dataKey="requests" fill="hsl(142.1 76.2% 36.3%)" radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
-            <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
-              <span>Jan 14, 4:46am</span>
-              <span>Jan 14, 5:41am</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Auth */}
-        <Card className="border-border">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-            <div className="flex items-center gap-2">
-              <HugeiconsIcon icon={LockPasswordIcon} className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-sm font-medium">Auth</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Auth Requests</div>
-              <div className="text-2xl font-semibold">1</div>
-            </div>
-            <ChartContainer
-              config={{
-                requests: {
-                  label: "Requests",
-                  color: "hsl(var(--chart-1))",
-                },
-              }}
-              className="h-20 w-full"
-            >
-              <BarChart data={authData}>
-                <Bar dataKey="requests" fill="hsl(142.1 76.2% 36.3%)" radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
-            <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
-              <span>Jan 14, 4:46am</span>
-              <span>Jan 14, 5:41am</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Storage */}
-        <Card className="border-border">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-            <div className="flex items-center gap-2">
-              <HugeiconsIcon icon={CloudIcon} className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-sm font-medium">Storage</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Storage Requests</div>
-              <div className="text-2xl font-semibold">1</div>
-            </div>
-            <ChartContainer
-              config={{
-                requests: {
-                  label: "Requests",
-                  color: "hsl(var(--chart-1))",
-                },
-              }}
-              className="h-20 w-full"
-            >
-              <BarChart data={storageData}>
-                <Bar dataKey="requests" fill="hsl(142.1 76.2% 36.3%)" radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
-            <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
-              <span>Jan 14, 4:46am</span>
-              <span>Jan 14, 5:41am</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Realtime */}
-        <Card className="border-border">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-            <div className="flex items-center gap-2">
-              <HugeiconsIcon icon={SignalIcon} className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-sm font-medium">Realtime</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Realtime Requests</div>
-              <div className="text-2xl font-semibold">0</div>
-            </div>
-            <ChartContainer
-              config={{
-                requests: {
-                  label: "Requests",
-                  color: "hsl(var(--chart-1))",
-                },
-              }}
-              className="h-20 w-full"
-            >
-              <BarChart data={realtimeData}>
-                <Bar dataKey="requests" fill="hsl(142.1 76.2% 36.3%)" radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
-            <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
-              <span>Jan 14, 4:46am</span>
-              <span>Jan 14, 5:41am</span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Recent Activity - Vertical Flow */}
-      <div className="mb-8">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-4">
-          Recent Activity
-        </h2>
-
-        <div className="space-y-2">
-          {/* Activity item */}
-          <div className="px-4 py-3 border border-border rounded-lg hover:bg-muted/30 transition-colors">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-medium">api-gateway</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-700 dark:text-green-400">
-                    Deployed
-                  </span>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  v2.1.4 deployed to production • Build #847
-                </p>
-              </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground whitespace-nowrap">
-                <span>2 min ago</span>
-                <Link href="/dashboard/deployments" className="text-primary hover:underline">
-                  View
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          <div className="px-4 py-3 border border-border rounded-lg hover:bg-muted/30 transition-colors">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-medium">user-service</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-400">
-                    Building
-                  </span>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Running tests and building artifacts • Build #1203
-                </p>
-              </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground whitespace-nowrap">
-                <span>5 min ago</span>
-                <Link href="/dashboard/deployments" className="text-primary hover:underline">
-                  View
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          <div className="px-4 py-3 border border-border rounded-lg hover:bg-muted/30 transition-colors">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-medium">payment-processor</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-700 dark:text-yellow-400">
-                    Warning
-                  </span>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  High memory usage detected • 82% of limit
-                </p>
-              </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground whitespace-nowrap">
-                <span>12 min ago</span>
-                <Link href="/dashboard/analytics" className="text-primary hover:underline">
-                  Investigate
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          <div className="px-4 py-3 border border-border rounded-lg hover:bg-muted/30 transition-colors">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-medium">auth-service</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-700 dark:text-green-400">
-                    Deployed
-                  </span>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  v1.8.2 deployed to production • Build #456
-                </p>
-              </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground whitespace-nowrap">
-                <span>1 hour ago</span>
-                <Link href="/dashboard/deployments" className="text-primary hover:underline">
-                  View
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          <div className="px-4 py-3 border border-border rounded-lg hover:bg-muted/30 transition-colors">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-medium">frontend-app</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-700 dark:text-green-400">
-                    Deployed
-                  </span>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  v3.2.1 deployed to production • Build #2341
-                </p>
-              </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground whitespace-nowrap">
-                <span>2 hours ago</span>
-                <Link href="/dashboard/deployments" className="text-primary hover:underline">
-                  View
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Actions - minimal, functional */}
-      <div className="pt-4 border-t border-border">
         <div className="flex items-center gap-3">
-          <Link href="/dashboard/projects">
-            <Button variant="outline" size="sm">
-              View All Projects
-            </Button>
-          </Link>
-          <Link href="/dashboard/deployments">
-            <Button variant="outline" size="sm">
-              Deployment History
-            </Button>
-          </Link>
+          <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+            Updated {fmtSecondsAgo(lastUpdated, now)}
+          </span>
+          <Button variant="outline" size="sm" onClick={refreshAll} disabled={anyLoading}>
+            <HugeiconsIcon
+              icon={RefreshIcon}
+              className={anyLoading ? "animate-spin" : undefined}
+            />
+            Refresh
+          </Button>
         </div>
       </div>
+
+      {/* Health plate */}
+      <div className="mb-8">
+        <MetricSection
+          title="Health summary"
+          data={summary.data}
+          error={summary.error}
+          loading={summary.loading}
+          onRetry={summary.refresh}
+          skeleton={<HealthBannerSkeleton />}
+        >
+          {(s) => <HealthBanner summary={s} />}
+        </MetricSection>
+      </div>
+
+      {/* Infrastructure */}
+      <section className="mb-8">
+        <SectionHeading>Infrastructure</SectionHeading>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <MetricSection
+            title="Server metrics"
+            data={server.data}
+            error={server.error}
+            loading={server.loading}
+            onRetry={server.refresh}
+            skeleton={<StatRowSkeleton count={3} />}
+          >
+            {(s) => (
+              <>
+                <StatCard
+                  icon={CpuIcon}
+                  title="CPU"
+                  value={fmtPct(s.cpu_pct)}
+                  tone={pctTone(s.cpu_pct)}
+                  progress={s.cpu_pct}
+                  hint={`${s.cpu_count} cores · load ${s.load_avg.map((l) => l.toFixed(2)).join(" / ")}`}
+                />
+                <StatCard
+                  icon={ComputerIcon}
+                  title="Memory"
+                  value={fmtPct(s.mem.pct)}
+                  tone={pctTone(s.mem.pct, 80, 92)}
+                  progress={s.mem.pct}
+                  hint={`${fmtBytes(s.mem.used)} of ${fmtBytes(s.mem.total)} · swap ${fmtPct(s.swap.pct, 0)}`}
+                />
+                <StatCard
+                  icon={HardDriveIcon}
+                  title="Disk"
+                  value={fmtPct(s.disk.pct)}
+                  tone={pctTone(s.disk.pct, 75, 90)}
+                  progress={s.disk.pct}
+                  hint={`${fmtBytes(s.disk.used)} of ${fmtBytes(s.disk.total)} on ${s.disk.path}`}
+                />
+              </>
+            )}
+          </MetricSection>
+          <MetricSection
+            title="Database metrics"
+            data={database.data}
+            error={database.error}
+            loading={database.loading}
+            onRetry={database.refresh}
+            skeleton={<StatRowSkeleton count={1} />}
+          >
+            {(d) => (
+              <StatCard
+                icon={Database02Icon}
+                title="Database"
+                value={d.size_pretty}
+                tone={d.ok ? pctTone(d.connections.pct, 60, 85) : "bad"}
+                progress={d.connections.pct}
+                hint={`${d.connections.total}/${d.connections.max} connections · cache hit ${fmtPct(d.cache_hit_ratio * 100, 0)}`}
+              />
+            )}
+          </MetricSection>
+        </div>
+      </section>
+
+      {/* API */}
+      <section className="mb-8">
+        <SectionHeading>API</SectionHeading>
+        <MetricSection
+          title="API metrics"
+          data={api.data}
+          error={api.error}
+          loading={api.loading}
+          onRetry={api.refresh}
+          skeleton={
+            <div className="grid gap-4 md:grid-cols-3">
+              <StatRowSkeleton count={3} />
+            </div>
+          }
+        >
+          {(a) =>
+            !a.configured ? (
+              <Card className="border-border">
+                <CardContent className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
+                  <HugeiconsIcon icon={AlertCircleIcon} className="h-4 w-4" />
+                  API traffic metrics are not configured on the status service.
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <StatCard
+                    icon={Activity03Icon}
+                    title={`Requests (${a.window_hours ?? 24}h)`}
+                    value={fmtNum(a.total_requests)}
+                    hint={`${(a.rps ?? 0).toFixed(3)} req/s · ${fmtBytes(a.bytes_out)} out`}
+                  />
+                  <StatCard
+                    icon={AlertCircleIcon}
+                    title="Error rate"
+                    value={fmtPct((a.error_rate ?? 0) * 100, 2)}
+                    tone={pctTone((a.error_rate ?? 0) * 100, 2, 5)}
+                    hint={`4xx ${fmtNum(a.status_codes?.["4xx"])} · 5xx ${fmtNum(a.status_codes?.["5xx"])}`}
+                  />
+                  <StatCard
+                    icon={Time01Icon}
+                    title="Latency p95"
+                    value={fmtMs(a.latency_ms?.p95)}
+                    tone={pctTone(a.latency_ms?.p95, 500, 1000)}
+                    hint={`p50 ${fmtMs(a.latency_ms?.p50)} · p99 ${fmtMs(a.latency_ms?.p99)}`}
+                  />
+                </div>
+                <TrafficChart series={a.series ?? []} windowHours={a.window_hours} />
+              </div>
+            )
+          }
+        </MetricSection>
+      </section>
+
+      {/* Content */}
+      <section className="mb-8">
+        <SectionHeading>Content</SectionHeading>
+        <MetricSection
+          title="Content metrics"
+          data={content.data}
+          error={content.error}
+          loading={content.loading}
+          onRetry={content.refresh}
+          skeleton={
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <StatRowSkeleton count={4} />
+              </div>
+              <ChartCardSkeleton />
+            </div>
+          }
+        >
+          {(c) => (
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <StatCard
+                  icon={Book02Icon}
+                  title="Articles"
+                  value={fmtNum(c.articles.total)}
+                  hint={`${fmtNum(c.articles.published)} published · ${fmtNum(c.articles.with_doi)} with DOI`}
+                />
+                <StatCard
+                  icon={UserMultipleIcon}
+                  title="Users"
+                  value={fmtNum(c.users)}
+                  hint={`${fmtNum(c.roles.admin ?? 0)} admins · ${fmtNum(c.roles.owner ?? 0)} owners`}
+                />
+                <StatCard
+                  icon={EyeIcon}
+                  title="Views"
+                  value={fmtNum(c.interactions.views)}
+                  hint={`${fmtNum(c.journals.total)} journals · ${fmtNum(c.issues)} issues`}
+                />
+                <StatCard
+                  icon={Download01Icon}
+                  title="Downloads"
+                  value={fmtNum(c.interactions.downloads)}
+                  hint={`${fmtNum(c.interactions.likes)} likes · ${fmtNum(c.citations)} citations`}
+                />
+              </div>
+              <GrowthChart growth={c.growth} />
+            </div>
+          )}
+        </MetricSection>
+      </section>
+
+      {/* Containers */}
+      <section>
+        <SectionHeading>Containers</SectionHeading>
+        <MetricSection
+          title="Container list"
+          data={summary.data}
+          error={summary.error}
+          loading={summary.loading}
+          onRetry={summary.refresh}
+          skeleton={<ChartCardSkeleton />}
+        >
+          {(s) => <ContainersCard containers={s.server?.containers ?? []} />}
+        </MetricSection>
+      </section>
     </div>
   );
 }
