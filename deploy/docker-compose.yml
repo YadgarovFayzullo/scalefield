@@ -33,6 +33,12 @@ services:
     env_file: .env
     environment:
       STATUS_API_URL: http://status-api:8000
+      # Control-plane: база `scalefield` на том же Postgres, что и бэкенд
+      # (контейнер `db` в backend_internal). Создаётся один раз:
+      #   docker exec backend-db-1 psql -U postgres -c 'create database scalefield'
+      # Миграции применяет сам образ на старте.
+      DATABASE_URL: ${DATABASE_URL}
+      BOOTSTRAP_SERVER_HOST: ${BOOTSTRAP_SERVER_HOST:-81.31.246.252}
     depends_on: [status-api]
     networks: [backend_internal, edge]
     labels:

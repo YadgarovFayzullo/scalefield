@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useProject } from "@/lib/project-context";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -184,8 +185,9 @@ function ListSkeleton() {
 }
 
 export default function DeploymentsPage() {
+  const { apiBase } = useProject();
   const { data, error, loading, updatedAt, refresh } = useMetric<DeploymentsData>(
-    "/api/deployments",
+    `${apiBase}/deployments`,
     30000,
   );
   const [selectedDeployment, setSelectedDeployment] = React.useState<string | null>(null);

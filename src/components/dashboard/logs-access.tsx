@@ -24,11 +24,7 @@ import {
 } from "@/components/dashboard/logs-shared";
 
 const ALL_HOSTS = "all";
-const HOST_ITEMS: { value: string; label: string }[] = [
-  { value: ALL_HOSTS, label: "All hosts" },
-  { value: "researcher.uz", label: "researcher.uz" },
-  { value: "api.researcher.uz", label: "api.researcher.uz" },
-];
+const ALL_ITEM = { value: ALL_HOSTS, label: "All hosts" };
 
 const LIMIT = 300;
 
@@ -53,6 +49,21 @@ export function LogsAccessView({
   );
 
   const items = React.useMemo(() => data?.items ?? [], [data]);
+  // Хосты в фильтре — те, что реально встретились в логе: список копится по
+  // мере поллинга, чтобы выбор одного хоста не прятал остальные из выпадашки.
+  const [knownHosts, setKnownHosts] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    const fresh = items.map((it) => it.host).filter(Boolean);
+    if (fresh.length === 0) return;
+    setKnownHosts((prev) => {
+      const merged = Array.from(new Set([...prev, ...fresh])).sort();
+      return merged.length === prev.length ? prev : merged;
+    });
+  }, [items]);
+  const hostItems = React.useMemo(
+    () => [ALL_ITEM, ...knownHosts.map((h) => ({ value: h, label: h }))],
+    [knownHosts],
+  );
   const q = search.trim().toLowerCase();
   const filtered = React.useMemo(
     () => (q ? items.filter((it) => it.path.toLowerCase().includes(q)) : items),
@@ -64,12 +75,12 @@ export function LogsAccessView({
       <div className="flex-1 flex flex-col min-w-0">
         <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-border">
           <LevelPills value={level} onChange={onLevelChange} />
-          <Select value={host} onValueChange={(v: string | null) => setHost(v ?? ALL_HOSTS)} items={HOST_ITEMS}>
+          <Select value={host} onValueChange={(v: string | null) => setHost(v ?? ALL_HOSTS)} items={hostItems}>
             <SelectTrigger size="sm" className="w-44">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {HOST_ITEMS.map((it) => (
+              {hostItems.map((it) => (
                 <SelectItem key={it.value} value={it.value}>
                   {it.label}
                 </SelectItem>

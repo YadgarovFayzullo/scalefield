@@ -3,12 +3,14 @@
 /**
  * Клиентский слой данных дашборда.
  *
- * Все метрики приходят из researcher-uz-status/api через серверный прокси
- * `/api/status/<metric>` (сессия в cookie, токен API — только на сервере),
- * история деплоев — из `/api/deployments` (GitHub Actions). Типы повторяют
- * JSON коллекторов один в один; менять поле здесь = менять его в Python.
+ * Все метрики приходят от агента проекта через серверный прокси
+ * `/api/projects/<slug>/status/<metric>` (сессия в cookie, токен агента —
+ * только на сервере), история деплоев — из `/api/projects/<slug>/deployments`.
+ * Slug проекта берётся из контекста `/p/[project]`. Типы повторяют JSON
+ * коллекторов один в один; менять поле здесь = менять его в Python.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useProject } from "@/lib/project-context";
 
 // ---------- типы ответов статус-API ----------
 
@@ -184,6 +186,7 @@ type State<T> = {
  * intervalMs=0 — без автообновления.
  */
 export function useMetric<T>(path: string, intervalMs = 10000): State<T> & { refresh: () => void } {
+  const { apiBase } = useProject();
   const [state, setState] = useState<State<T>>({
     data: null,
     error: null,
@@ -194,7 +197,7 @@ export function useMetric<T>(path: string, intervalMs = 10000): State<T> & { ref
 
   const load = useCallback(async () => {
     try {
-      const url = path.startsWith("/") ? path : `/api/status/${path}`;
+      const url = path.startsWith("/") ? path : `${apiBase}/status/${path}`;
       const res = await fetch(url, { cache: "no-store" });
       if (res.status === 401) {
         window.location.href = "/login";
@@ -211,7 +214,7 @@ export function useMetric<T>(path: string, intervalMs = 10000): State<T> & { ref
       if (!alive.current) return;
       setState((s) => ({ ...s, error: String(e), loading: false }));
     }
-  }, [path]);
+  }, [apiBase, path]);
 
   useEffect(() => {
     alive.current = true;
