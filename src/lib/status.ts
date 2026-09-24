@@ -170,6 +170,7 @@ export type Deployment = {
   source?: string; // github_actions | scalefield
   service?: string | null;
   log?: string | null;
+  image?: string | null;
 };
 
 export type DeploymentsData = { configured: boolean; items: Deployment[]; errors: string[] };

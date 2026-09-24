@@ -3,6 +3,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { COOKIE_NAME, isValidSession } from "@/lib/session";
 import { db, schema } from "@/db";
 import { getProject, projectRepos } from "@/lib/projects";
+import { deploymentToItem, syncDeployment } from "@/lib/services";
 import type { Deployment, DeploymentsData } from "@/lib/status";
 
 export const runtime = "nodejs";
@@ -115,17 +116,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   if (!project) return NextResponse.json({ error: "Unknown project" }, { status: 404 });
 
   const repos = await projectRepos(project.id);
-  if (repos.length === 0) {
-    return NextResponse.json({ configured: false, items: [], errors: [] } satisfies DeploymentsData);
-  }
 
   let state = lastSync.get(project.id);
-  if (!state || Date.now() - state.at > SYNC_MS) {
+  if (repos.length > 0 && (!state || Date.now() - state.at > SYNC_MS)) {
     state = { at: Date.now(), errors: [] };
     lastSync.set(project.id, state);
     state.errors = await syncProject(project.id);
   }
-  const errors = state.errors;
+  const errors = state?.errors ?? [];
 
   const rows = await db
     .select()
@@ -135,25 +133,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
     .limit(100);
   const serviceNames = new Map(project.services.map((s) => [s.id, s.name]));
 
-  const items: Deployment[] = rows.map((r) => ({
-    id: r.externalId,
-    source: r.source,
-    service: r.serviceId ? (serviceNames.get(r.serviceId) ?? null) : null,
-    log: r.log,
-    repo: r.repo || "",
-    workflow: r.workflow || "",
-    branch: r.branch || "",
-    sha: (r.sha || "").slice(0, 7),
-    title: r.title || "",
-    status: r.status,
-    conclusion: r.conclusion,
-    event: r.event || "",
-    created_at: r.startedAt.toISOString(),
-    updated_at: r.updatedAt.toISOString(),
-    duration_s: r.durationS,
-    url: r.url || "",
-    actor: r.actor || "",
-    actor_avatar: r.actorAvatar || "",
-  }));
+  // Незавершённые задачи агента — подтянуть состояние, чтобы список был живым.
+  const synced = await Promise.all(rows.map((r) => (r.source === "scalefield" && r.status !== "completed" ? syncDeployment(slug, r) : r)));
+  const items: Deployment[] = synced.map((r) => deploymentToItem(r, r.serviceId ? (serviceNames.get(r.serviceId) ?? null) : null));
   return NextResponse.json({ configured: true, items, errors } satisfies DeploymentsData);
 }

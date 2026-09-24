@@ -170,6 +170,11 @@ export type ServiceView = {
   command: string | null;
   volumes: string[];
   createdAt: string;
+  branch: string | null;
+  dockerfile: string | null;
+  buildContext: string | null;
+  autoDeploy: boolean;
+  webhookSecret: string | null;
   env: Record<string, string>;
   domains: string[];
 };
@@ -184,16 +189,14 @@ export type ServiceInput = {
   env?: Record<string, string>;
   volumes?: string[];
   domains?: string[];
+  branch?: string | null;
+  dockerfile?: string | null;
+  buildContext?: string | null;
+  autoDeploy?: boolean;
+  rotateWebhookSecret?: boolean;
 };
 
-export type DeployResponse = {
-  ok: boolean;
-  output: string;
-  container: { name: string; status: string; health: string | null; image: string } | null;
-  service: ServiceView;
-  deployment_id: string;
-  error?: string;
-};
+export type ImagesResult = { current: string | null; images: { image: string; at: string }[] };
 
 /** KEY=VALUE построчно → объект; строки без `=` и комментарии пропускаются. */
 export function parseEnvText(text: string): Record<string, string> {

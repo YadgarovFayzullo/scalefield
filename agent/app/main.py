@@ -17,7 +17,17 @@ from app.collectors.content import collect_content
 from app.collectors.database import collect_database
 from app.collectors.server import collect_container_logs, collect_server
 from app.config import settings
-from app.deploy import DeployError, DeploySpec, RemoveSpec, deploy as run_deploy, remove as run_remove, stack as read_stack
+from app.deploy import (
+    BuildSpec,
+    DeployError,
+    DeploySpec,
+    RemoveSpec,
+    remove as run_remove,
+    run_build_job,
+    run_deploy_job,
+    stack as read_stack,
+)
+from app.jobs import get_job, start_job
 from app.db import close_pool, get_pool
 from app.security import require_token
 
@@ -126,16 +136,37 @@ async def container_logs(
     return await collect_container_logs(name=name, tail=tail)
 
 
-# ---------- деплой ----------
+# ---------- деплой и сборка (фоновые задачи с живым логом) ----------
 
 
-@app.post("/deploy", dependencies=[Depends(require_token)])
-async def deploy_service(spec: DeploySpec) -> dict:
+@app.post("/jobs/deploy", dependencies=[Depends(require_token)])
+async def job_deploy(spec: DeploySpec) -> dict:
     """Записать сервис в compose-стек проекта и поднять его (`up -d --pull always`)."""
     try:
-        return await run_deploy(spec)
+        job = start_job("deploy", {"project": spec.project, "service": spec.service, "image": spec.image}, run_deploy_job(spec))
     except DeployError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    return job.to_dict()
+
+
+@app.post("/jobs/build", dependencies=[Depends(require_token)])
+async def job_build(spec: BuildSpec) -> dict:
+    """Клонировать репозиторий, собрать образ и задеплоить его."""
+    d = spec.deploy
+    try:
+        job = start_job("build", {"project": d.project, "service": d.service, "image": d.image, "ref": spec.ref}, run_build_job(spec))
+    except DeployError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return job.to_dict()
+
+
+@app.get("/jobs/{job_id}", dependencies=[Depends(require_token)])
+async def job_state(job_id: str, since: int = Query(0, ge=0)) -> dict:
+    """Состояние задачи и строки лога начиная с `since`."""
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown job")
+    return job.to_dict(since)
 
 
 @app.post("/deploy/remove", dependencies=[Depends(require_token)])

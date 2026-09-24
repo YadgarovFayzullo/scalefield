@@ -15,6 +15,13 @@
       "when": 1790285351137,
       "tag": "0001_services_deploy",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790286133314,
+      "tag": "0002_build_rollback",
+      "breakpoints": true
     }
   ]
 }

@@ -6,8 +6,12 @@ import { COOKIE_NAME, isValidSession } from "@/lib/session";
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // Webhook GitHub приходит без сессии — его защищает подпись секретом.
   const isPublic =
-    pathname === "/login" || pathname === "/api/login" || pathname === "/api/logout";
+    pathname === "/login" ||
+    pathname === "/api/login" ||
+    pathname === "/api/logout" ||
+    pathname.startsWith("/api/hooks/");
   if (isPublic) return NextResponse.next();
 
   const token = req.cookies.get(COOKIE_NAME)?.value;

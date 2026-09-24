@@ -4,7 +4,9 @@ import Image from "next/image";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon, LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { buttonVariants } from "@/components/ui/button";
+import * as React from "react";
 import { fmtAgo, fmtDuration, fmtTime, type Deployment } from "@/lib/status";
+import { useProject } from "@/lib/project-context";
 import { DeploymentStatusBadge, runState, shortRepo } from "./deployments-status";
 
 type Props = {
@@ -23,7 +25,31 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 /** Slide-in side panel with every field of the selected GitHub Actions run. */
-export function DeploymentDetailPanel({ deployment, visible, onClose }: Props) {
+export function DeploymentDetailPanel({ deployment: initial, visible, onClose }: Props) {
+  const { apiBase } = useProject();
+  // Деплой через агента, пока идёт, поллим сами раз в 2 с — список
+  // обновляется реже, а лог должен расти на глазах.
+  const [live, setLive] = React.useState<Deployment | null>(null);
+  React.useEffect(() => {
+    setLive(null);
+    if (initial.source !== "scalefield" || initial.status === "completed") return;
+    const id = initial.id;
+    const tick = async () => {
+      try {
+        const res = await fetch(`${apiBase}/deployments/${encodeURIComponent(id)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const json = (await res.json()) as { deployment: Deployment };
+        setLive(json.deployment);
+        if (json.deployment.status === "completed") clearInterval(t);
+      } catch {
+        /* сеть моргнула — попробуем на следующем тике */
+      }
+    };
+    const t = setInterval(() => void tick(), 2000);
+    void tick();
+    return () => clearInterval(t);
+  }, [initial.id, initial.source, initial.status, apiBase]);
+  const deployment = live ?? initial;
   const state = runState(deployment);
   const runNumber = deployment.id.split("#").pop() ?? deployment.id;
 

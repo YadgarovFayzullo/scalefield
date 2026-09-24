@@ -108,11 +108,25 @@ organizations ─┬─ memberships ── users
   Deploy/Redeploy/Remove, лог в `deployments` (source = scalefield).
   Контейнер называется `<project>-<service>`; без доменов порт публикуется
   на 127.0.0.1 хоста.
-- [ ] Rollback на предыдущий образ (история образов уже в `deployments.title`).
-- [ ] Билдер: GitHub App → webhook на push → сборка (GitHub Actions или свой
-  раннер) → образ в реестр (ghcr.io или свой) → команда агенту.
-- [ ] Логи сборки, статус деплоя в реальном времени (сейчас — ответ по завершении).
-- Готово, когда researcher-uz деплоится кнопкой без CI-скрипта в репо.
+- [x] Фоновые задачи агента с живым логом (25.09): `POST /jobs/deploy`,
+  `POST /jobs/build`, `GET /jobs/<id>?since=` (`agent/app/jobs.py`); строка в
+  `deployments` создаётся сразу как in_progress, `syncDeployment` подтягивает
+  лог и результат, панель поллит раз в 2 с.
+- [x] Rollback (25.09): `deployments.image` + `GET …/services/<id>/images` —
+  список успешно задеплоенных образов, откат = деплой выбранного.
+- [x] Сборка из Git (25.09): агент клонирует репозиторий (`git clone --depth 1
+  --branch`), собирает `docker build` на том же хосте и деплоит образ
+  `<project>/<service>:<ref>-<время>` без реестра (модель Dokku/Coolify).
+  Webhook GitHub `POST /api/hooks/github/<serviceId>` с подписью
+  `X-Hub-Signature-256` секретом сервиса; push в ветку при `autoDeploy` →
+  сборка. Репозиторий — `owner/name` (GitHub, приватный через `GITHUB_TOKEN`)
+  или полный git-URL.
+- [ ] Билдер на отдельном хосте + реестр: сервер researcher.uz (2 ГБ) сборку
+  Next не потянет; нужен `servers.role = builder`, `docker push` в реестр и
+  деплой на целевой сервер.
+- [ ] GitHub App вместо PAT + ручного webhook (одна кнопка «подключить репо»).
+- Готово, когда researcher-uz деплоится кнопкой без CI-скрипта в репо
+  (упирается в билдер-хост).
 
 **Фаза 3 — базы данных.**
 - [x] Редактор таблиц (25.09): список таблиц по схемам, страницы строк,

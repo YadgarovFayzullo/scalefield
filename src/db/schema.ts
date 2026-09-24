@@ -13,6 +13,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   integer,
   jsonb,
   pgTable,
@@ -110,6 +111,13 @@ export const services = pgTable(
     command: text("command"),
     envEnc: text("env_enc"),
     volumes: jsonb("volumes").$type<string[]>().notNull().default([]),
+    // Сборка из Git: ветка, Dockerfile и контекст в репозитории; webhook
+    // GitHub подписывается секретом (шифрован), autoDeploy — деплоить ли по push.
+    branch: text("branch"),
+    dockerfile: text("dockerfile"),
+    buildContext: text("build_context"),
+    autoDeploy: boolean("auto_deploy").notNull().default(false),
+    webhookSecretEnc: text("webhook_secret_enc"),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("services_project_name").on(t.projectId, t.name)],
@@ -151,6 +159,8 @@ export const deployments = pgTable(
     durationS: integer("duration_s"),
     // Вывод `docker compose up` для деплоев через агента (source = scalefield).
     log: text("log"),
+    // Образ, который деплоился — для отката на предыдущий.
+    image: text("image"),
   },
   (t) => [uniqueIndex("deployments_source_external").on(t.source, t.externalId)],
 );

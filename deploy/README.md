@@ -48,7 +48,10 @@ Traefik должен писать JSON access-log в `/var/log/traefik/access.lo
 (том `/opt/apps` и docker.sock без `:ro` в его compose) и поднимает сервис
 `docker compose -p <project> up -d --pull always`. Стек живёт рядом с
 остальными и правится руками так же; сервисы с доменами получают лейблы
-Traefik и сеть `edge`.
+Traefik и сеть `edge`. Сборка из Git идёт на том же хосте
+(`/opt/apps/.builds/<project>/<service>`), образ остаётся локальным; логи задач —
+`/opt/apps/.jobs/<id>.log`. Webhook GitHub: `https://status.researcher.uz/api/hooks/github/<serviceId>`,
+секрет — из формы сервиса, событие push, content type JSON.
 
 ## Обновление
 

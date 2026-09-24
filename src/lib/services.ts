@@ -1,22 +1,31 @@
 import "server-only";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { decryptSecret, encryptSecret } from "@/lib/secrets";
 import { agentRequest } from "@/lib/agent";
 import { getProjectAgent } from "@/lib/projects";
-import type { Domain, Service } from "@/db/schema";
+import type { DeploymentRow, Domain, Service } from "@/db/schema";
 
 /**
- * Сервисы проекта и деплой через агента.
+ * Сервисы проекта, деплой и сборка через агента.
  *
  * Сервис = контейнер: образ, порт, env, тома, домены. Деплой собирает из
- * этого описание для агента (`POST /deploy`), тот пишет compose-стек
+ * этого описание для агента (`POST /jobs/deploy`), тот пишет compose-стек
  * `/opt/apps/<project>/docker-compose.yml` и делает `up -d --pull always`.
+ * Сборка (`POST /jobs/build`) клонирует репозиторий на сервере, собирает
+ * образ и деплоит его. Обе — фоновые задачи агента: строка в `deployments`
+ * создаётся сразу со статусом in_progress, а `syncDeployment` подтягивает
+ * лог и результат, пока клиент поллит.
  * Домены превращаются в лейблы Traefik (как у существующих стеков на сервере),
  * поэтому сервис с доменом попадает в сеть `edge`.
  */
 
-export type ServiceView = Omit<Service, "envEnc"> & { env: Record<string, string>; domains: string[] };
+export type ServiceView = Omit<Service, "envEnc" | "webhookSecretEnc"> & {
+  env: Record<string, string>;
+  domains: string[];
+  webhookSecret: string | null;
+};
 
 export class ServiceError extends Error {
   constructor(message: string, public status = 400) {
@@ -26,6 +35,8 @@ export class ServiceError extends Error {
 
 const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const HOST_RE = /^(?=.{1,253}$)([a-z0-9-]+\.)+[a-z]{2,}$/i;
+// `owner/name` на GitHub или полный git-URL (GitLab, self-hosted, file:// для тестов).
+const REPO_RE = /^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|(https?|ssh|git|file):\/\/\S+)$/;
 
 function parseEnv(envEnc: string | null): Record<string, string> {
   if (!envEnc) return {};
@@ -37,8 +48,21 @@ function parseEnv(envEnc: string | null): Record<string, string> {
 }
 
 function view(s: Service, domains: Domain[]): ServiceView {
-  const { envEnc, ...rest } = s;
-  return { ...rest, env: parseEnv(envEnc), domains: domains.filter((d) => d.serviceId === s.id).map((d) => d.hostname) };
+  const { envEnc, webhookSecretEnc, ...rest } = s;
+  let webhookSecret: string | null = null;
+  if (webhookSecretEnc) {
+    try {
+      webhookSecret = decryptSecret(webhookSecretEnc);
+    } catch {
+      webhookSecret = null;
+    }
+  }
+  return {
+    ...rest,
+    env: parseEnv(envEnc),
+    domains: domains.filter((d) => d.serviceId === s.id).map((d) => d.hostname),
+    webhookSecret,
+  };
 }
 
 export async function listServices(projectId: string): Promise<ServiceView[]> {
@@ -59,6 +83,16 @@ export async function getService(projectId: string, id: string): Promise<Service
   return view(rows[0], domains);
 }
 
+/** Для webhook: сервис по id вместе с проектом (без сессии — подпись проверяется секретом). */
+export async function getServiceForHook(id: string): Promise<{ service: ServiceView; project: { id: string; slug: string } } | null> {
+  const rows = await db.select().from(schema.services).where(eq(schema.services.id, id)).limit(1);
+  if (!rows[0]) return null;
+  const project = await db.query.projects.findFirst({ where: eq(schema.projects.id, rows[0].projectId), columns: { id: true, slug: true } });
+  if (!project) return null;
+  const domains = await db.select().from(schema.domains).where(eq(schema.domains.serviceId, id));
+  return { service: view(rows[0], domains), project };
+}
+
 export type ServiceInput = {
   name?: string;
   kind?: string;
@@ -70,6 +104,12 @@ export type ServiceInput = {
   env?: Record<string, string>;
   volumes?: string[];
   domains?: string[];
+  branch?: string | null;
+  dockerfile?: string | null;
+  buildContext?: string | null;
+  autoDeploy?: boolean;
+  /** true — сгенерировать новый секрет webhook, false — удалить. */
+  rotateWebhookSecret?: boolean;
 };
 
 function validate(input: ServiceInput) {
@@ -77,9 +117,13 @@ function validate(input: ServiceInput) {
   if (input.port !== undefined && input.port !== null && (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535)) {
     throw new ServiceError("Port must be 1..65535");
   }
+  if (input.repo && !REPO_RE.test(input.repo)) throw new ServiceError("Repository must be owner/name (GitHub) or a git URL");
   for (const d of input.domains ?? []) if (!HOST_RE.test(d)) throw new ServiceError(`Invalid domain: ${d}`);
   for (const v of input.volumes ?? []) if (!/^[^\s:]+:[^\s:]+(:(ro|rw))?$/.test(v)) throw new ServiceError(`Invalid volume: ${v}`);
   for (const k of Object.keys(input.env ?? {})) if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new ServiceError(`Invalid env name: ${k}`);
+  for (const p of [input.dockerfile, input.buildContext]) {
+    if (p && (p.includes("..") || p.startsWith("/"))) throw new ServiceError("Dockerfile/context must be a path inside the repository");
+  }
 }
 
 export async function createService(projectId: string, input: ServiceInput): Promise<ServiceView> {
@@ -97,10 +141,19 @@ export async function createService(projectId: string, input: ServiceInput): Pro
       repo: input.repo ?? null,
       envEnc: input.env && Object.keys(input.env).length ? encryptSecret(JSON.stringify(input.env)) : null,
       volumes: input.volumes ?? [],
+      branch: input.branch ?? null,
+      dockerfile: input.dockerfile ?? null,
+      buildContext: input.buildContext ?? null,
+      autoDeploy: input.autoDeploy ?? false,
+      webhookSecretEnc: input.rotateWebhookSecret ? encryptSecret(newSecret()) : null,
     })
     .returning();
   await setDomains(row.id, input.domains ?? []);
   return (await getService(projectId, row.id))!;
+}
+
+function newSecret(): string {
+  return randomBytes(24).toString("hex");
 }
 
 export async function updateService(projectId: string, id: string, input: ServiceInput): Promise<ServiceView> {
@@ -116,6 +169,12 @@ export async function updateService(projectId: string, id: string, input: Servic
   if (input.repo !== undefined) patch.repo = input.repo;
   if (input.container !== undefined) patch.container = input.container;
   if (input.volumes !== undefined) patch.volumes = input.volumes;
+  if (input.branch !== undefined) patch.branch = input.branch;
+  if (input.dockerfile !== undefined) patch.dockerfile = input.dockerfile;
+  if (input.buildContext !== undefined) patch.buildContext = input.buildContext;
+  if (input.autoDeploy !== undefined) patch.autoDeploy = input.autoDeploy;
+  if (input.rotateWebhookSecret === true) patch.webhookSecretEnc = encryptSecret(newSecret());
+  if (input.rotateWebhookSecret === false) patch.webhookSecretEnc = null;
   if (input.env !== undefined) patch.envEnc = Object.keys(input.env).length ? encryptSecret(JSON.stringify(input.env)) : null;
   if (Object.keys(patch).length) await db.update(schema.services).set(patch).where(eq(schema.services.id, id));
   if (input.domains !== undefined) await setDomains(id, input.domains);
@@ -146,28 +205,8 @@ function traefikLabels(project: string, service: string, domains: string[], port
   return labels;
 }
 
-type AgentDeployResult = {
-  ok: boolean;
-  output: string;
-  compose_path: string;
-  container: { name: string; status: string; health: string | null; image: string; started_at?: string } | null;
-};
-
-export async function deployService(
-  projectSlug: string,
-  projectId: string,
-  id: string,
-  opts: { image?: string; actor?: string },
-): Promise<{ deployment: typeof schema.deployments.$inferSelect; service: ServiceView; result: AgentDeployResult }> {
-  const service = await getService(projectId, id);
-  if (!service) throw new ServiceError("Unknown service", 404);
-  const image = (opts.image ?? service.image ?? "").trim();
-  if (!image) throw new ServiceError("Image is required");
-  const agent = await getProjectAgent(projectSlug);
-  if (!agent) throw new ServiceError("Project has no server/agent", 409);
-
-  const startedAt = new Date();
-  const spec = {
+function deploySpec(projectSlug: string, service: ServiceView, image: string) {
+  return {
     project: projectSlug,
     service: service.name,
     image,
@@ -178,47 +217,181 @@ export async function deployService(
     labels: traefikLabels(projectSlug, service.name, service.domains, service.port),
     command: service.command,
   };
+}
 
-  let result: AgentDeployResult;
-  try {
-    result = await agentRequest<AgentDeployResult>(agent, "/deploy", { method: "POST", body: spec, timeoutMs: 620_000 });
-  } catch (e) {
-    result = { ok: false, output: e instanceof Error ? e.message : String(e), compose_path: "", container: null };
-  }
-  const finishedAt = new Date();
+type AgentJob = {
+  id: string;
+  kind: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  started_at: number;
+  finished_at: number | null;
+  result: { ok?: boolean; container?: { name: string } | null; image?: string; sha?: string; stage?: string } | null;
+  error: string | null;
+  lines: string[];
+  line_count: number;
+};
 
-  const [deployment] = await db
+async function recordJob(
+  projectId: string,
+  service: ServiceView,
+  job: AgentJob,
+  opts: { image: string; actor: string; event: string; title: string; branch?: string | null; sha?: string | null },
+): Promise<DeploymentRow> {
+  const [row] = await db
     .insert(schema.deployments)
     .values({
       projectId,
-      serviceId: id,
+      serviceId: service.id,
       source: "scalefield",
-      externalId: crypto.randomUUID(),
+      externalId: job.id,
       repo: service.repo,
-      workflow: "deploy",
-      branch: null,
-      sha: null,
-      title: `${service.name} ← ${image}`,
-      event: "manual",
-      status: "completed",
-      conclusion: result.ok ? "success" : "failure",
-      actor: opts.actor ?? "owner",
+      workflow: job.kind,
+      branch: opts.branch ?? null,
+      sha: opts.sha ?? null,
+      title: opts.title,
+      event: opts.event,
+      status: "in_progress",
+      conclusion: null,
+      actor: opts.actor,
       actorAvatar: "",
       url: null,
-      startedAt,
-      updatedAt: finishedAt,
-      durationS: Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000),
-      log: result.output,
+      startedAt: new Date(job.started_at * 1000),
+      updatedAt: new Date(),
+      durationS: null,
+      log: job.lines.join("\n"),
+      image: opts.image,
     })
     .returning();
+  return row;
+}
 
-  if (result.ok) {
+/** Деплой готового образа: задача агента + строка in_progress в deployments. */
+export async function deployService(
+  projectSlug: string,
+  projectId: string,
+  id: string,
+  opts: { image?: string; actor?: string; event?: string },
+): Promise<DeploymentRow> {
+  const service = await getService(projectId, id);
+  if (!service) throw new ServiceError("Unknown service", 404);
+  const image = (opts.image ?? service.image ?? "").trim();
+  if (!image) throw new ServiceError("Image is required");
+  const agent = await getProjectAgent(projectSlug);
+  if (!agent) throw new ServiceError("Project has no server/agent", 409);
+  const job = await agentRequest<AgentJob>(agent, "/jobs/deploy", { method: "POST", body: deploySpec(projectSlug, service, image) });
+  return recordJob(projectId, service, job, {
+    image,
+    actor: opts.actor ?? "owner",
+    event: opts.event ?? "manual",
+    title: `${service.name} ← ${image}`,
+  });
+}
+
+/** Сборка из Git и деплой: образ `<project>/<service>:<ref>-<время>` остаётся на хосте. */
+export async function buildService(
+  projectSlug: string,
+  projectId: string,
+  id: string,
+  opts: { ref?: string; sha?: string; actor?: string; event?: string; title?: string },
+): Promise<DeploymentRow> {
+  const service = await getService(projectId, id);
+  if (!service) throw new ServiceError("Unknown service", 404);
+  if (!service.repo) throw new ServiceError("Service has no repository");
+  const agent = await getProjectAgent(projectSlug);
+  if (!agent) throw new ServiceError("Project has no server/agent", 409);
+  const ref = (opts.ref || service.branch || "main").trim();
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15).toLowerCase();
+  const image = `${projectSlug}/${service.name}:${ref.replace(/[^a-z0-9._-]/gi, "-").toLowerCase()}-${stamp}`;
+  const token = process.env.GITHUB_TOKEN;
+  let repoUrl = service.repo.includes("://") ? service.repo : `https://github.com/${service.repo}.git`;
+  // Приватные репозитории GitHub: токен в URL, агент его в лог не пишет.
+  if (token && /^https:\/\/github\.com\//.test(repoUrl)) repoUrl = repoUrl.replace("https://github.com/", `https://x-access-token:${token}@github.com/`);
+  const job = await agentRequest<AgentJob>(agent, "/jobs/build", {
+    method: "POST",
+    body: {
+      repo_url: repoUrl,
+      ref,
+      dockerfile: service.dockerfile || "Dockerfile",
+      context: service.buildContext || ".",
+      deploy: deploySpec(projectSlug, service, image),
+    },
+  });
+  return recordJob(projectId, service, job, {
+    image,
+    actor: opts.actor ?? "owner",
+    event: opts.event ?? "manual",
+    title: opts.title ?? `${service.name} ← build ${service.repo}@${ref}`,
+    branch: ref,
+    sha: opts.sha ?? null,
+  });
+}
+
+/** Подтянуть состояние задачи агента в строку деплоя; завершённые не трогаем. */
+export async function syncDeployment(projectSlug: string, row: DeploymentRow): Promise<DeploymentRow> {
+  if (row.source !== "scalefield" || row.status === "completed") return row;
+  const agent = await getProjectAgent(projectSlug);
+  if (!agent) return row;
+  let job: AgentJob;
+  try {
+    job = await agentRequest<AgentJob>(agent, `/jobs/${row.externalId}`);
+  } catch (e) {
+    // Агент перезапустился и задачу забыл — закрываем как сбой, чтобы не
+    // висела «в процессе» вечно.
+    const [updated] = await db
+      .update(schema.deployments)
+      .set({ status: "completed", conclusion: "failure", updatedAt: new Date(), log: `${row.log ?? ""}\nERROR: ${e instanceof Error ? e.message : String(e)}`.trim() })
+      .where(eq(schema.deployments.id, row.id))
+      .returning();
+    return updated;
+  }
+  const done = job.status === "succeeded" || job.status === "failed";
+  const patch: Partial<typeof schema.deployments.$inferInsert> = {
+    log: job.lines.join("\n"),
+    updatedAt: new Date(),
+    sha: job.result?.sha ? job.result.sha : row.sha,
+  };
+  if (done) {
+    patch.status = "completed";
+    patch.conclusion = job.status === "succeeded" ? "success" : "failure";
+    patch.durationS = job.finished_at ? Math.max(0, Math.round(job.finished_at - job.started_at)) : null;
+  }
+  const [updated] = await db.update(schema.deployments).set(patch).where(eq(schema.deployments.id, row.id)).returning();
+  if (done && job.status === "succeeded" && row.serviceId) {
     await db
       .update(schema.services)
-      .set({ image, container: result.container?.name ?? `${projectSlug}-${service.name}` })
-      .where(eq(schema.services.id, id));
+      .set({ image: job.result?.image ?? row.image ?? undefined, container: job.result?.container?.name ?? `${projectSlug}-${(row.title ?? "").split(" ")[0]}` })
+      .where(eq(schema.services.id, row.serviceId));
   }
-  return { deployment, service: (await getService(projectId, id))!, result };
+  return updated;
+}
+
+export async function getDeployment(projectSlug: string, projectId: string, externalId: string): Promise<DeploymentRow | null> {
+  const rows = await db
+    .select()
+    .from(schema.deployments)
+    .where(and(eq(schema.deployments.projectId, projectId), eq(schema.deployments.externalId, externalId)))
+    .limit(1);
+  if (!rows[0]) return null;
+  return syncDeployment(projectSlug, rows[0]);
+}
+
+/** Образы, которые успешно деплоились у сервиса — для отката (свежие первыми, без повторов). */
+export async function serviceImages(serviceId: string, limit = 10): Promise<{ image: string; at: string }[]> {
+  const rows = await db
+    .select({ image: schema.deployments.image, at: schema.deployments.startedAt })
+    .from(schema.deployments)
+    .where(and(eq(schema.deployments.serviceId, serviceId), eq(schema.deployments.conclusion, "success")))
+    .orderBy(desc(schema.deployments.startedAt))
+    .limit(100);
+  const seen = new Set<string>();
+  const out: { image: string; at: string }[] = [];
+  for (const r of rows) {
+    if (!r.image || seen.has(r.image)) continue;
+    seen.add(r.image);
+    out.push({ image: r.image, at: r.at.toISOString() });
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 export async function removeService(projectSlug: string, projectId: string, id: string): Promise<{ output: string }> {
@@ -239,4 +412,29 @@ export async function removeService(projectSlug: string, projectId: string, id: 
   }
   await db.delete(schema.services).where(eq(schema.services.id, id));
   return { output };
+}
+
+/** Строка deployments → формат панели (общий с прогонами GitHub Actions). */
+export function deploymentToItem(r: DeploymentRow, serviceName: string | null) {
+  return {
+    id: r.externalId,
+    source: r.source,
+    service: serviceName,
+    log: r.log,
+    image: r.image,
+    repo: r.repo || "",
+    workflow: r.workflow || "",
+    branch: r.branch || "",
+    sha: (r.sha || "").slice(0, 7),
+    title: r.title || "",
+    status: r.status,
+    conclusion: r.conclusion,
+    event: r.event || "",
+    created_at: r.startedAt.toISOString(),
+    updated_at: r.updatedAt.toISOString(),
+    duration_s: r.durationS,
+    url: r.url || "",
+    actor: r.actor || "",
+    actor_avatar: r.actorAvatar || "",
+  };
 }

@@ -32,6 +32,11 @@ export function ServiceSheet({
   const [volumes, setVolumes] = React.useState("");
   const [command, setCommand] = React.useState("");
   const [repo, setRepo] = React.useState("");
+  const [branch, setBranch] = React.useState("");
+  const [dockerfile, setDockerfile] = React.useState("");
+  const [context, setContext] = React.useState("");
+  const [autoDeploy, setAutoDeploy] = React.useState(false);
+  const [rotate, setRotate] = React.useState<boolean | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -46,6 +51,11 @@ export function ServiceSheet({
     setVolumes(service?.volumes.join("\n") ?? "");
     setCommand(service?.command ?? "");
     setRepo(service?.repo ?? "");
+    setBranch(service?.branch ?? "");
+    setDockerfile(service?.dockerfile ?? "");
+    setContext(service?.buildContext ?? "");
+    setAutoDeploy(service?.autoDeploy ?? false);
+    setRotate(undefined);
     setError(null);
   }, [open, service]);
 
@@ -62,6 +72,11 @@ export function ServiceSheet({
       volumes: volumes.split("\n").map((s) => s.trim()).filter(Boolean),
       command: command.trim() || null,
       repo: repo.trim() || null,
+      branch: branch.trim() || null,
+      dockerfile: dockerfile.trim() || null,
+      buildContext: context.trim() || null,
+      autoDeploy,
+      ...(rotate === undefined ? {} : { rotateWebhookSecret: rotate }),
     };
     try {
       const res = service
@@ -114,6 +129,47 @@ export function ServiceSheet({
           {field("Environment", <Textarea className="min-h-28 font-mono text-xs" value={env} onChange={(e) => setEnv(e.target.value)} placeholder={"DATABASE_URL=postgres://…\nNODE_ENV=production"} />, "KEY=VALUE per line. Stored encrypted; written into the compose file on deploy.")}
           {field("Volumes", <Textarea className="min-h-12 font-mono text-xs" value={volumes} onChange={(e) => setVolumes(e.target.value)} placeholder="/opt/data/app:/data" />, "host:container[:ro] per line.")}
           {field("Command", <Input className="h-8 font-mono text-xs" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="(image default)" />)}
+
+          <div className="space-y-3 rounded-md border border-dashed border-border p-3">
+            <div className="text-xs font-medium">Build from Git</div>
+            <div className="grid grid-cols-3 gap-2">
+              {field("Branch", <Input className="h-8 font-mono text-xs" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />)}
+              {field("Dockerfile", <Input className="h-8 font-mono text-xs" value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} placeholder="Dockerfile" />)}
+              {field("Context", <Input className="h-8 font-mono text-xs" value={context} onChange={(e) => setContext(e.target.value)} placeholder="." />)}
+            </div>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={autoDeploy} onChange={(e) => setAutoDeploy(e.target.checked)} />
+              Auto-deploy on push to the branch (needs the webhook below)
+            </label>
+            <div className="space-y-1 text-xs">
+              <div className="font-medium">GitHub webhook</div>
+              {service ? (
+                <>
+                  <div className="font-mono text-[11px] break-all text-muted-foreground">
+                    {typeof window !== "undefined" ? window.location.origin : ""}/api/hooks/github/{service.id}
+                  </div>
+                  {service.webhookSecret && rotate !== false ? (
+                    <div className="font-mono text-[11px] break-all">secret: {rotate ? "(new secret after save)" : service.webhookSecret}</div>
+                  ) : (
+                    <div className="text-[11px] text-muted-foreground">{rotate ? "A secret will be generated on save." : "No secret yet — the hook is disabled."}</div>
+                  )}
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setRotate(true)}>
+                      {service.webhookSecret ? "Rotate secret" : "Generate secret"}
+                    </Button>
+                    {service.webhookSecret && (
+                      <Button size="sm" variant="ghost" onClick={() => setRotate(false)}>
+                        Disable
+                      </Button>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">Content type: application/json, event: push. Builds run on the project server.</div>
+                </>
+              ) : (
+                <div className="text-[11px] text-muted-foreground">Save the service first to get a webhook URL.</div>
+              )}
+            </div>
+          </div>
         </div>
         {error && <div className="mx-4 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">{error}</div>}
         <SheetFooter>
