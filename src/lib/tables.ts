@@ -100,3 +100,57 @@ export function shortType(t: string): string {
     .replace("integer", "int4")
     .replace("bigint", "int8");
 }
+
+// ---------- SQL-редактор и схема ----------
+
+export type SqlColumn = { name: string; type: string };
+export type SqlStatementResult = {
+  command: string | null;
+  columns: SqlColumn[];
+  rows: Record<string, unknown>[];
+  row_count: number;
+  truncated: boolean;
+};
+export type SqlRunResult = { statements: SqlStatementResult[]; duration_ms: number; read_only: boolean };
+
+export type IndexInfo = { name: string; definition: string; unique: boolean; primary: boolean; size_bytes: number };
+export type NewColumn = { name: string; type: string; nullable?: boolean; default?: string | null; pk?: boolean };
+export type SchemaResult = { columns: ColumnInfo[]; indexes: IndexInfo[] };
+
+/** Частые типы для подсказки в формах колонок; любой другой тип тоже принимается. */
+export const COMMON_TYPES = [
+  "text",
+  "varchar(255)",
+  "integer",
+  "bigint",
+  "numeric",
+  "boolean",
+  "uuid",
+  "timestamptz",
+  "date",
+  "jsonb",
+  "text[]",
+  "serial",
+  "bigserial",
+];
+
+export function toCsv(columns: string[], rows: Record<string, unknown>[]): string {
+  const esc = (v: unknown) => {
+    if (v === null || v === undefined) return "";
+    const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const lines = [columns.map(esc).join(",")];
+  for (const r of rows) lines.push(columns.map((c) => esc(r[c])).join(","));
+  return lines.join("\n") + "\n";
+}
+
+export function downloadText(filename: string, text: string, type = "text/csv;charset=utf-8") {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

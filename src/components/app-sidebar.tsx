@@ -24,6 +24,7 @@ import {
   Activity03Icon,
   EditTableIcon,
   Table01Icon,
+  SourceCodeIcon,
 } from "@hugeicons/core-free-icons";
 
 // Разделы проекта; href относительно /p/<slug>.
@@ -35,6 +36,7 @@ const navItems = [
   { title: "Logs", href: "/logs", icon: FileScriptIcon },
   { title: "Database", href: "/database", icon: EditTableIcon },
   { title: "Table Editor", href: "/tables", icon: Table01Icon },
+  { title: "SQL Editor", href: "/sql", icon: SourceCodeIcon },
 ];
 
 type ProjectRef = { slug: string; name: string };

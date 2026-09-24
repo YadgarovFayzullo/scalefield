@@ -15,7 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, ArrowDown01Icon, ArrowUp01Icon, Delete02Icon, RefreshIcon } from "@hugeicons/core-free-icons";
+import { Add01Icon, ArrowDown01Icon, ArrowUp01Icon, Delete02Icon, Download01Icon, RefreshIcon, Settings02Icon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 import { fmtNum } from "@/lib/status";
 import {
@@ -31,6 +31,7 @@ import {
   type TableInfo,
 } from "@/lib/tables";
 import { InsertRowSheet } from "./table-editor-insert";
+import { SchemaSheet } from "./table-editor-schema";
 
 const PAGE_SIZE = 50;
 
@@ -42,7 +43,17 @@ type Filter = { column: string; op: FilterOp; value: string };
  * первичного ключа и представления — только чтение: без PK строку нельзя
  * адресовать однозначно.
  */
-export function TableGrid({ apiBase, table }: { apiBase: string; table: TableInfo }) {
+export function TableGrid({
+  apiBase,
+  table,
+  onSchemaChanged,
+  onDropped,
+}: {
+  apiBase: string;
+  table: TableInfo;
+  onSchemaChanged: () => void;
+  onDropped: () => void;
+}) {
   const url = `${apiBase}/tables/${encodeURIComponent(table.schema)}/${encodeURIComponent(table.name)}`;
   const [offset, setOffset] = React.useState(0);
   const [order, setOrder] = React.useState<{ col: string; dir: "asc" | "desc" } | null>(null);
@@ -54,6 +65,7 @@ export function TableGrid({ apiBase, table }: { apiBase: string; table: TableInf
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [editing, setEditing] = React.useState<{ key: string; col: string } | null>(null);
   const [insertOpen, setInsertOpen] = React.useState(false);
+  const [schemaOpen, setSchemaOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [notice, setNotice] = React.useState<string | null>(null);
 
@@ -136,6 +148,21 @@ export function TableGrid({ apiBase, table }: { apiBase: string; table: TableInf
     }
   };
 
+  const exportUrl = React.useMemo(() => {
+    const sp = new URLSearchParams();
+    if (order) {
+      sp.set("order", order.col);
+      sp.set("dir", order.dir);
+    }
+    if (filter) {
+      sp.set("fcol", filter.column);
+      sp.set("fop", filter.op);
+      sp.set("fval", filter.value);
+    }
+    const q = sp.toString();
+    return `${url}/export${q ? `?${q}` : ""}`;
+  }, [url, order, filter]);
+
   const allSelected = rows.length > 0 && rows.every((r) => selected.has(rowKey(r, pk)));
   const total = data?.total ?? 0;
   const from = total === 0 ? 0 : offset + 1;
@@ -168,6 +195,18 @@ export function TableGrid({ apiBase, table }: { apiBase: string; table: TableInf
             Insert row
           </Button>
         )}
+        <Button
+          size="sm"
+          variant="outline"
+          render={<a href={exportUrl} download title="Export CSV (current filter and order)" />}
+        >
+          <HugeiconsIcon icon={Download01Icon} />
+          CSV
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => setSchemaOpen(true)} title="Columns and indexes">
+          <HugeiconsIcon icon={Settings02Icon} />
+          Schema
+        </Button>
         <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
           <HugeiconsIcon icon={RefreshIcon} className={loading ? "animate-spin" : undefined} />
         </Button>
@@ -350,6 +389,17 @@ export function TableGrid({ apiBase, table }: { apiBase: string; table: TableInf
       </div>
 
       <InsertRowSheet open={insertOpen} onOpenChange={setInsertOpen} url={url} columns={columns} onInserted={() => void load()} />
+      <SchemaSheet
+        open={schemaOpen}
+        onOpenChange={setSchemaOpen}
+        url={url}
+        table={table}
+        onChanged={() => {
+          onSchemaChanged();
+          void load();
+        }}
+        onDropped={onDropped}
+      />
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>

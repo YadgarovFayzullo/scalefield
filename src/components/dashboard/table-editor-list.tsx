@@ -14,12 +14,14 @@ export function TableList({
   error,
   selected,
   onSelect,
+  onNewTable,
 }: {
   tables: TableInfo[];
   loading: boolean;
   error: string | null;
   selected: { schema: string; name: string } | null;
   onSelect: (t: TableInfo) => void;
+  onNewTable: (schema: string) => void;
 }) {
   const [q, setQ] = React.useState("");
   const [schema, setSchema] = React.useState<string>("public");
@@ -51,6 +53,12 @@ export function TableList({
           ))}
         </select>
         <Input placeholder="Search tables…" value={q} onChange={(e) => setQ(e.target.value)} className="h-8 text-sm" />
+        <button
+          onClick={() => onNewTable(schema)}
+          className="w-full rounded-md border border-dashed border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+        >
+          + New table
+        </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
         {loading ? (

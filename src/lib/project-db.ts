@@ -104,6 +104,25 @@ export async function getProjectDatabase(slug: string, dbId?: string) {
 }
 
 type Sql = ReturnType<typeof postgres>;
+type Params = NonNullable<Parameters<Sql["unsafe"]>[1]>;
+type Param = Params[number];
+
+/**
+ * Значение для параметра, привязанного к `$n::<type>`. postgres.js берёт тип
+ * параметра из описания запроса и для json/jsonb сериализует значение через
+ * JSON.stringify — строка `{"k":1}` превратилась бы в JSON-строку `"{\"k\":1}"`.
+ * Поэтому для json-колонок передаём разобранный объект.
+ */
+function paramFor(col: ColumnInfo, value: string): Param {
+  if (col.type === "json" || col.type === "jsonb") {
+    try {
+      return JSON.parse(value) as Param;
+    } catch {
+      throw new ProjectDbError(`Column ${col.name}: invalid JSON`);
+    }
+  }
+  return value;
+}
 
 export async function listTables(sql: Sql): Promise<TableInfo[]> {
   const rows = await sql.unsafe(`
@@ -200,7 +219,7 @@ function columnByName(columns: ColumnInfo[], name: string): ColumnInfo {
 function buildWhere(
   columns: ColumnInfo[],
   filter: RowFilter | null,
-  params: string[],
+  params: Params,
 ): string {
   if (!filter) return "";
   const col = columnByName(columns, filter.column);
@@ -211,8 +230,29 @@ function buildWhere(
     params.push(`%${filter.value}%`);
     return ` where ${qi(col.name)}::text ILIKE $${params.length}`;
   }
-  params.push(filter.value);
+  params.push(paramFor(col, filter.value));
   return ` where ${qi(col.name)} ${op} $${params.length}::${col.type}`;
+}
+
+/** SELECT для страницы строк и для экспорта: WHERE/ORDER BY без LIMIT. */
+export async function buildSelect(
+  sql: Sql,
+  schemaName: string,
+  table: string,
+  opts: { order?: string; dir?: "asc" | "desc"; filter: RowFilter | null },
+): Promise<{ query: string; params: Params; columns: ColumnInfo[]; pk: string[]; estRows: number; where: string }> {
+  const { estRows } = await resolveTable(sql, schemaName, table);
+  const columns = await describeTable(sql, schemaName, table);
+  const pk = columns.filter((c) => c.is_pk).map((c) => c.name);
+  const rel = qi(schemaName) + "." + qi(table);
+  const params: Params = [];
+  const where = buildWhere(columns, opts.filter, params);
+  // Без сортировки Postgres отдаёт строки в произвольном порядке, и страницы
+  // бы «прыгали»; по умолчанию сортируем по первичному ключу.
+  const orderCols = opts.order ? [columnByName(columns, opts.order).name] : pk;
+  const dir = opts.dir === "desc" ? "DESC" : "ASC";
+  const orderBy = orderCols.length ? ` order by ${orderCols.map((c) => `${qi(c)} ${dir}`).join(", ")}` : "";
+  return { query: `select * from ${rel}${where}${orderBy}`, params, columns, pk, estRows, where };
 }
 
 export async function fetchRows(
@@ -221,26 +261,12 @@ export async function fetchRows(
   table: string,
   opts: { limit: number; offset: number; order?: string; dir?: "asc" | "desc"; filter: RowFilter | null },
 ): Promise<RowsResult> {
-  const { estRows } = await resolveTable(sql, schemaName, table);
-  const columns = await describeTable(sql, schemaName, table);
-  const pk = columns.filter((c) => c.is_pk).map((c) => c.name);
+  const { query, params, columns, pk, estRows, where } = await buildSelect(sql, schemaName, table, opts);
   const limit = Math.min(Math.max(1, opts.limit), MAX_LIMIT);
   const offset = Math.max(0, opts.offset);
   const rel = qi(schemaName) + "." + qi(table);
 
-  const params: string[] = [];
-  const where = buildWhere(columns, opts.filter, params);
-
-  // Без сортировки Postgres отдаёт строки в произвольном порядке, и страницы
-  // бы «прыгали»; по умолчанию сортируем по первичному ключу.
-  const orderCols = opts.order ? [columnByName(columns, opts.order).name] : pk;
-  const dir = opts.dir === "desc" ? "DESC" : "ASC";
-  const orderBy = orderCols.length ? ` order by ${orderCols.map((c) => `${qi(c)} ${dir}`).join(", ")}` : "";
-
-  const rows = await sql.unsafe(
-    `select * from ${rel}${where}${orderBy} limit ${limit} offset ${offset}`,
-    params,
-  );
+  const rows = await sql.unsafe(`${query} limit ${limit} offset ${offset}`, params);
 
   let total: number;
   let totalExact: boolean;
@@ -267,14 +293,14 @@ export async function fetchRows(
 /** Значение из UI: строка или null. Пустая строка — это пустая строка, не NULL. */
 export type CellValue = string | null;
 
-function pkPredicate(columns: ColumnInfo[], pkValues: Record<string, CellValue>, params: string[]): string {
+function pkPredicate(columns: ColumnInfo[], pkValues: Record<string, CellValue>, params: Params): string {
   const pk = columns.filter((c) => c.is_pk);
   if (pk.length === 0) throw new ProjectDbError("Table has no primary key — read-only", 409);
   const parts = pk.map((c) => {
     if (!(c.name in pkValues)) throw new ProjectDbError(`Missing primary key value: ${c.name}`);
     const v = pkValues[c.name];
     if (v === null) return `${qi(c.name)} IS NULL`;
-    params.push(v);
+    params.push(paramFor(c, v));
     return `${qi(c.name)} = $${params.length}::${c.type}`;
   });
   return parts.join(" AND ");
@@ -291,12 +317,12 @@ export async function updateRow(
   const columns = await describeTable(sql, schemaName, table);
   const names = Object.keys(set);
   if (names.length === 0) throw new ProjectDbError("Nothing to update");
-  const params: string[] = [];
+  const params: Params = [];
   const assignments = names.map((n) => {
     const col = columnByName(columns, n);
     const v = set[n];
     if (v === null) return `${qi(col.name)} = NULL`;
-    params.push(v);
+    params.push(paramFor(col, v));
     return `${qi(col.name)} = $${params.length}::${col.type}`;
   });
   const where = pkPredicate(columns, pkValues, params);
@@ -318,7 +344,7 @@ export async function insertRow(
   await resolveTable(sql, schemaName, table);
   const columns = await describeTable(sql, schemaName, table);
   const names = Object.keys(values);
-  const params: string[] = [];
+  const params: Params = [];
   const rel = `${qi(schemaName)}.${qi(table)}`;
   let query: string;
   if (names.length === 0) {
@@ -329,7 +355,7 @@ export async function insertRow(
       const col = columnByName(columns, n);
       const v = values[n];
       if (v === null) return "NULL";
-      params.push(v);
+      params.push(paramFor(col, v));
       return `$${params.length}::${col.type}`;
     });
     query = `insert into ${rel} (${cols.join(", ")}) values (${vals.join(", ")}) returning *`;
@@ -352,7 +378,7 @@ export async function deleteRows(
   let deleted = 0;
   await sql.begin(async (tx) => {
     for (const k of keys) {
-      const params: string[] = [];
+      const params: Params = [];
       const where = pkPredicate(columns, k, params);
       const res = await tx.unsafe(`delete from ${rel} where ${where}`, params);
       deleted += res.count;
