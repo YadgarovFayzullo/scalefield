@@ -23,6 +23,7 @@ import {
   FileScriptIcon,
   Activity03Icon,
   EditTableIcon,
+  Table01Icon,
 } from "@hugeicons/core-free-icons";
 
 // Разделы проекта; href относительно /p/<slug>.
@@ -33,6 +34,7 @@ const navItems = [
   { title: "Analytics", href: "/analytics", icon: ChartLineData01Icon },
   { title: "Logs", href: "/logs", icon: FileScriptIcon },
   { title: "Database", href: "/database", icon: EditTableIcon },
+  { title: "Table Editor", href: "/tables", icon: Table01Icon },
 ];
 
 type ProjectRef = { slug: string; name: string };

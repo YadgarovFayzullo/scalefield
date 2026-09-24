@@ -29,7 +29,8 @@ scp deploy/docker-compose.yml root@81.31.246.252:/opt/apps/status/
 # База control-plane на Postgres бэкенда (сеть backend_internal):
 ssh root@81.31.246.252 "docker exec backend-db-1 psql -U postgres -c 'create database scalefield'"
 # .env создаётся на сервере (секреты генерируются там же, см. ../.env.example):
-#   DATABASE_URL=postgresql://<user>:<pass>@db:5432/scalefield, ENCRYPTION_KEY, BOOTSTRAP_*
+#   DATABASE_URL=postgresql://<user>:<pass>@db:5432/scalefield, ENCRYPTION_KEY, BOOTSTRAP_*,
+#   BOOTSTRAP_DATABASE_URL=postgresql://<user>:<pass>@db:5432/scientific_db (редактор таблиц)
 ssh root@81.31.246.252 'cd /opt/apps/status && docker compose up -d'
 ```
 

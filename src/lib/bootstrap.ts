@@ -13,7 +13,10 @@ import { encryptSecret } from "@/lib/secrets";
  */
 export async function bootstrapFromEnv(): Promise<void> {
   const existing = await db.select({ id: schema.organizations.id }).from(schema.organizations).limit(1);
-  if (existing.length > 0) return;
+  if (existing.length > 0) {
+    await ensureDatabaseFromEnv();
+    return;
+  }
 
   const agentUrl = process.env.STATUS_API_URL;
   const agentToken = process.env.STATUS_API_TOKEN;
@@ -68,6 +71,40 @@ export async function bootstrapFromEnv(): Promise<void> {
     }
   });
   console.log(`[scalefield] control-plane инициализирован: org=${orgSlug} project=${projectSlug}`);
+  await ensureDatabaseFromEnv();
+}
+
+/**
+ * Регистрирует базу проекта из BOOTSTRAP_DATABASE_URL, если у проекта ещё нет
+ * ни одной: редактору таблиц нужна строка подключения, а она появилась позже
+ * первого бутстрапа. Идемпотентно.
+ */
+async function ensureDatabaseFromEnv(): Promise<void> {
+  const url = process.env.BOOTSTRAP_DATABASE_URL;
+  if (!url) return;
+  const projectSlug = process.env.BOOTSTRAP_PROJECT_SLUG || "researcher-uz";
+  const project = await db.query.projects.findFirst({ where: eq(schema.projects.slug, projectSlug) });
+  if (!project) return;
+  const has = await db
+    .select({ id: schema.databases.id })
+    .from(schema.databases)
+    .where(eq(schema.databases.projectId, project.id))
+    .limit(1);
+  if (has.length > 0) return;
+  let name = "postgres";
+  try {
+    name = new URL(url).pathname.replace(/^\//, "") || name;
+  } catch {
+    /* оставляем имя по умолчанию */
+  }
+  await db.insert(schema.databases).values({
+    projectId: project.id,
+    serverId: project.serverId,
+    name,
+    engine: "postgres",
+    urlEnc: encryptSecret(url),
+  });
+  console.log(`[scalefield] база ${name} зарегистрирована у проекта ${projectSlug}`);
 }
 
 export async function projectExists(slug: string): Promise<boolean> {
