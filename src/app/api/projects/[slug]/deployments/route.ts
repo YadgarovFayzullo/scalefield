@@ -133,9 +133,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
     .where(eq(schema.deployments.projectId, project.id))
     .orderBy(desc(schema.deployments.startedAt))
     .limit(100);
+  const serviceNames = new Map(project.services.map((s) => [s.id, s.name]));
 
   const items: Deployment[] = rows.map((r) => ({
     id: r.externalId,
+    source: r.source,
+    service: r.serviceId ? (serviceNames.get(r.serviceId) ?? null) : null,
+    log: r.log,
     repo: r.repo || "",
     workflow: r.workflow || "",
     branch: r.branch || "",

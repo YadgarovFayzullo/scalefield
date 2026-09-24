@@ -154,3 +154,64 @@ export function downloadText(filename: string, text: string, type = "text/csv;ch
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// ---------- сервисы ----------
+
+export type ServiceView = {
+  id: string;
+  projectId: string;
+  name: string;
+  kind: string;
+  container: string | null;
+  repo: string | null;
+  workflow: string | null;
+  port: number | null;
+  image: string | null;
+  command: string | null;
+  volumes: string[];
+  createdAt: string;
+  env: Record<string, string>;
+  domains: string[];
+};
+
+export type ServiceInput = {
+  name?: string;
+  kind?: string;
+  image?: string | null;
+  port?: number | null;
+  command?: string | null;
+  repo?: string | null;
+  env?: Record<string, string>;
+  volumes?: string[];
+  domains?: string[];
+};
+
+export type DeployResponse = {
+  ok: boolean;
+  output: string;
+  container: { name: string; status: string; health: string | null; image: string } | null;
+  service: ServiceView;
+  deployment_id: string;
+  error?: string;
+};
+
+/** KEY=VALUE построчно → объект; строки без `=` и комментарии пропускаются. */
+export function parseEnvText(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const i = line.indexOf("=");
+    if (i <= 0) continue;
+    let v = line.slice(i + 1).trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    out[line.slice(0, i).trim()] = v;
+  }
+  return out;
+}
+
+export function envToText(env: Record<string, string>): string {
+  return Object.entries(env)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+}

@@ -167,6 +167,9 @@ export type Deployment = {
   url: string;
   actor: string;
   actor_avatar: string;
+  source?: string; // github_actions | scalefield
+  service?: string | null;
+  log?: string | null;
 };
 
 export type DeploymentsData = { configured: boolean; items: Deployment[]; errors: string[] };

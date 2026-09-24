@@ -104,6 +104,12 @@ export const services = pgTable(
     repo: text("repo"), // owner/name на GitHub
     workflow: text("workflow"),
     port: integer("port"),
+    // Деплой через агента: образ, команда, тома и переменные окружения
+    // (зашифрованный JSON {KEY: value}).
+    image: text("image"),
+    command: text("command"),
+    envEnc: text("env_enc"),
+    volumes: jsonb("volumes").$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("services_project_name").on(t.projectId, t.name)],
@@ -143,6 +149,8 @@ export const deployments = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
     durationS: integer("duration_s"),
+    // Вывод `docker compose up` для деплоев через агента (source = scalefield).
+    log: text("log"),
   },
   (t) => [uniqueIndex("deployments_source_external").on(t.source, t.externalId)],
 );

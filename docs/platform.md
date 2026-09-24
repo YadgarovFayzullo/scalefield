@@ -14,7 +14,7 @@ Scalefield — панель и control-plane для проектов, котор
 |---|---|---|
 | Control-plane | Next.js 16 route handlers + Drizzle + Postgres (`scalefield`) | `src/db`, `src/lib/projects.ts`, `src/app/api/projects/*` |
 | Панель | Next.js 16, shadcn/ui, recharts; проекты → `/p/<slug>/…` | `src/app/dashboard`, `src/app/p/[project]` |
-| Агент сервера | FastAPI: psutil, docker.sock, `pg_stat_*`, JSON access-log Traefik | `agent/` (бывший `researcher-uz-status/api`) |
+| Агент сервера | FastAPI: psutil, docker.sock, `pg_stat_*`, JSON access-log Traefik; деплой сервисов через `docker compose` | `agent/` (бывший `researcher-uz-status/api`) |
 | Деплой | GitHub Actions собирает образ и грузит его на сервер по SSH, `docker compose up` | `.github/workflows/ci.yml` в репо researcher-uz |
 | Маршрутизация и TLS | Traefik с Let's Encrypt, сеть `edge` | `/opt/apps/traefik` на сервере |
 | База проекта | Postgres 17 (pgvector) в контейнере, бэкап ночью в R2 | `/opt/apps/backend`, бакет `researcher-backup` |
@@ -100,12 +100,18 @@ organizations ─┬─ memberships ── users
 - Готово, когда второй проект (не researcher.uz) добавляется без правки кода.
 
 **Фаза 2 — деплой из Git.**
-- Агент получает команду `deploy` (образ, env, compose-фрагмент) и выполняет
-  `docker pull` + `compose up`; результат и логи — в `deployments`.
-- Билдер: GitHub App → webhook на push → сборка (GitHub Actions или свой
+- [x] Деплой через агента (25.09): `POST /deploy` пишет сервис в compose-стек
+  `${APPS_ROOT}/<project>/docker-compose.yml` и делает `up -d --pull always`
+  (`agent/app/deploy.py`, нужен docker CLI + compose-плагин в образе агента и
+  том `/opt/apps`). Control-plane: сервисы с образом, портом, env (шифрованные),
+  томами, доменами → лейблы Traefik + сеть `edge`; `/p/<slug>/services` —
+  Deploy/Redeploy/Remove, лог в `deployments` (source = scalefield).
+  Контейнер называется `<project>-<service>`; без доменов порт публикуется
+  на 127.0.0.1 хоста.
+- [ ] Rollback на предыдущий образ (история образов уже в `deployments.title`).
+- [ ] Билдер: GitHub App → webhook на push → сборка (GitHub Actions или свой
   раннер) → образ в реестр (ghcr.io или свой) → команда агенту.
-- Панель: кнопка Redeploy, rollback на предыдущий образ, env-переменные
-  сервиса (шифрованные), логи сборки.
+- [ ] Логи сборки, статус деплоя в реальном времени (сейчас — ответ по завершении).
 - Готово, когда researcher-uz деплоится кнопкой без CI-скрипта в репо.
 
 **Фаза 3 — базы данных.**

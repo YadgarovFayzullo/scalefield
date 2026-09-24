@@ -15,10 +15,14 @@ services:
       DISK_PATH: /host
       PROC_ROOT: /host/proc
       CADDY_ACCESS_LOG: /var/log/traefik/access.log
+      APPS_ROOT: /opt/apps
     volumes:
       - /proc:/host/proc:ro
       - /:/host:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Деплой: агент зовёт `docker compose` и пишет стеки проектов в /opt/apps
+      # (тот же путь, что на хосте — compose резолвит тома относительно него).
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/apps:/opt/apps
       - /var/log/traefik:/var/log/traefik:ro
     networks: [backend_internal]
     healthcheck:

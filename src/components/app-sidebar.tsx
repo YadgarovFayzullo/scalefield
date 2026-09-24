@@ -25,11 +25,13 @@ import {
   EditTableIcon,
   Table01Icon,
   SourceCodeIcon,
+  PackageIcon,
 } from "@hugeicons/core-free-icons";
 
 // Разделы проекта; href относительно /p/<slug>.
 const navItems = [
   { title: "Overview", href: "", icon: DashboardSquare02Icon },
+  { title: "Services", href: "/services", icon: PackageIcon },
   { title: "Deployments", href: "/deployments", icon: GroupLayersIcon },
   { title: "Monitoring", href: "/monitoring", icon: Activity03Icon },
   { title: "Analytics", href: "/analytics", icon: ChartLineData01Icon },

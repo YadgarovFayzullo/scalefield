@@ -42,6 +42,14 @@ Traefik должен писать JSON access-log в `/var/log/traefik/access.lo
 (флаги `--accesslog.filepath`, `--accesslog.format=json` и том в его compose),
 иначе разделы Analytics и Logs покажут «not configured».
 
+## Деплой сервисов через панель
+
+Агент пишет compose-стек проекта в `/opt/apps/<project>/docker-compose.yml`
+(том `/opt/apps` и docker.sock без `:ro` в его compose) и поднимает сервис
+`docker compose -p <project> up -d --pull always`. Стек живёт рядом с
+остальными и правится руками так же; сервисы с доменами получают лейблы
+Traefik и сеть `edge`.
+
 ## Обновление
 
 Пересобрать нужный образ, перенести, `docker compose up -d` в `/opt/apps/status`.

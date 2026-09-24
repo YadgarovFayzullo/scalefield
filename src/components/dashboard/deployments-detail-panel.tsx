@@ -124,10 +124,23 @@ export function DeploymentDetailPanel({ deployment, visible, onClose }: Props) {
               Commit
             </h3>
             <p className="text-sm mb-2 break-words">{deployment.title}</p>
-            <p className="text-xs text-muted-foreground font-mono">
-              {deployment.branch} @ {deployment.sha}
-            </p>
+            {(deployment.branch || deployment.sha) && (
+              <p className="text-xs text-muted-foreground font-mono">
+                {deployment.branch} @ {deployment.sha}
+              </p>
+            )}
           </div>
+
+          {deployment.log && (
+            <div>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                Deploy log
+              </h3>
+              <pre className="max-h-80 overflow-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-[11px] whitespace-pre-wrap">
+                {deployment.log}
+              </pre>
+            </div>
+          )}
         </div>
       </div>
     </div>

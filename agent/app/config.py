@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # Окно агрегации метрик трафика, часов.
     API_WINDOW_HOURS: int = 24
 
+    # Корень compose-стеков проектов для деплоя (на хосте /opt/apps; в
+    # контейнер монтируется по тому же пути, чтобы docker compose видел файлы).
+    APPS_ROOT: str = "/opt/apps"
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

@@ -1,14 +1,15 @@
-"""FastAPI-сервис статуса researcher.uz.
+"""Агент Scalefield на сервере проекта.
 
-Только чтение метрик: сервер (psutil/docker), Postgres (pg_stat_*), контент
-(SQL), HTTP-трафик (лог прокси), логи контейнеров. Всё под токеном, кроме
-/healthz.
+Метрики: сервер (psutil/docker), Postgres (pg_stat_*), контент (SQL),
+HTTP-трафик (лог прокси), логи контейнеров. Деплой: control-plane присылает
+описание сервиса, агент пишет compose-стек и поднимает контейнер
+(app/deploy.py). Всё под токеном, кроме /healthz.
 """
 from __future__ import annotations
 
 import time
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.collectors.api_traffic import collect_access_logs, collect_api_traffic
@@ -16,6 +17,7 @@ from app.collectors.content import collect_content
 from app.collectors.database import collect_database
 from app.collectors.server import collect_container_logs, collect_server
 from app.config import settings
+from app.deploy import DeployError, DeploySpec, RemoveSpec, deploy as run_deploy, remove as run_remove, stack as read_stack
 from app.db import close_pool, get_pool
 from app.security import require_token
 
@@ -25,7 +27,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -122,3 +124,33 @@ async def container_logs(
 ) -> dict:
     """Хвост stdout/stderr контейнера через docker.sock."""
     return await collect_container_logs(name=name, tail=tail)
+
+
+# ---------- деплой ----------
+
+
+@app.post("/deploy", dependencies=[Depends(require_token)])
+async def deploy_service(spec: DeploySpec) -> dict:
+    """Записать сервис в compose-стек проекта и поднять его (`up -d --pull always`)."""
+    try:
+        return await run_deploy(spec)
+    except DeployError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/deploy/remove", dependencies=[Depends(require_token)])
+async def remove_service(spec: RemoveSpec) -> dict:
+    """Остановить контейнер и убрать сервис из compose-стека."""
+    try:
+        return await run_remove(spec)
+    except DeployError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/deploy/{project}", dependencies=[Depends(require_token)])
+async def deploy_stack(project: str) -> dict:
+    """Сервисы compose-стека проекта и состояние их контейнеров."""
+    try:
+        return await read_stack(project)
+    except DeployError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
