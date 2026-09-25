@@ -22,11 +22,13 @@ export default async function ProjectLayout({
   const [project, all] = await Promise.all([getProject(slug), listProjects()]);
   if (!project) notFound();
 
+  const domains = Array.from(new Set(project.services.flatMap((s) => s.domains.map((d) => d.hostname))));
   const ctx: ProjectContextValue = {
     slug: project.slug,
     name: project.name,
     serverName: project.server?.name ?? null,
     contentMetrics: Boolean(project.settings.contentMetrics),
+    domains,
     apiBase: `/api/projects/${project.slug}`,
     pathBase: `/p/${project.slug}`,
   };

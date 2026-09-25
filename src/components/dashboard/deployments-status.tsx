@@ -52,6 +52,21 @@ export function shortRepo(repo: string): string {
   return i === -1 ? repo : repo.slice(i + 1);
 }
 
+/**
+ * Production/Preview — у нас нет отдельного окружения предпросмотра, поэтому
+ * помечаем по тому, что реально происходит: деплой через агента идёт сразу в
+ * прод (`agent/app/deploy.py` поднимает боевой контейнер), а у прогонов
+ * GitHub Actions прод — это push в `main` (см. `.github/workflows/ci.yml`:
+ * job `deploy` условие `github.ref == 'refs/heads/main'`), всё остальное —
+ * предпросмотр (PR-сборка, ручной запуск на другой ветке).
+ */
+export type Environment = "production" | "preview";
+
+export function environmentOf(d: Deployment): Environment {
+  if (d.source === "scalefield") return "production";
+  return d.branch === "main" ? "production" : "preview";
+}
+
 type StateConfig = {
   label: string;
   color: string;

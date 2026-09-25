@@ -132,9 +132,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
     .orderBy(desc(schema.deployments.startedAt))
     .limit(100);
   const serviceNames = new Map(project.services.map((s) => [s.id, s.name]));
+  const serviceDomains = new Map(project.services.map((s) => [s.id, s.domains.map((d) => d.hostname)]));
 
   // Незавершённые задачи агента — подтянуть состояние, чтобы список был живым.
   const synced = await Promise.all(rows.map((r) => (r.source === "scalefield" && r.status !== "completed" ? syncDeployment(slug, r) : r)));
-  const items: Deployment[] = synced.map((r) => deploymentToItem(r, r.serviceId ? (serviceNames.get(r.serviceId) ?? null) : null));
+  const items: Deployment[] = synced.map((r) =>
+    deploymentToItem(r, r.serviceId ? (serviceNames.get(r.serviceId) ?? null) : null, r.serviceId ? (serviceDomains.get(r.serviceId) ?? []) : []),
+  );
   return NextResponse.json({ configured: true, items, errors } satisfies DeploymentsData);
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useProject } from "@/lib/project-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -48,6 +47,7 @@ import {
   GrowthChart,
   TrafficChart,
 } from "@/components/dashboard/overview-charts";
+import { OverviewHero } from "@/components/dashboard/overview-hero";
 
 /**
  * Dashboard Overview Page
@@ -84,7 +84,6 @@ function StatRowSkeleton({ count }: { count: number }) {
 }
 
 export default function DashboardPage() {
-  const project = useProject();
   const summary = useMetric<SummaryData>("summary", 10_000);
   const server = useMetric<ServerData>("server", 10_000);
   const database = useMetric<DatabaseData>("database", 30_000);
@@ -105,11 +104,13 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <OverviewHero />
+
       {/* Page header */}
       <div className="mb-6 sm:mb-8 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-semibold mb-1">Overview</h1>
-          <p className="text-sm text-muted-foreground">{project.name} · platform status</p>
+          <h2 className="text-lg font-semibold mb-1">Platform status</h2>
+          <p className="text-sm text-muted-foreground">Infrastructure, database and content metrics.</p>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">

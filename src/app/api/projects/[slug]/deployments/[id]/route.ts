@@ -15,6 +15,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   if (!project) return NextResponse.json({ error: "Unknown project" }, { status: 404 });
   const row = await getDeployment(slug, project.id, id);
   if (!row) return NextResponse.json({ error: "Unknown deployment" }, { status: 404 });
-  const serviceName = row.serviceId ? (project.services.find((s) => s.id === row.serviceId)?.name ?? null) : null;
-  return NextResponse.json({ deployment: deploymentToItem(row, serviceName) });
+  const service = row.serviceId ? project.services.find((s) => s.id === row.serviceId) : undefined;
+  return NextResponse.json({ deployment: deploymentToItem(row, service?.name ?? null, service?.domains.map((d) => d.hostname) ?? []) });
 }

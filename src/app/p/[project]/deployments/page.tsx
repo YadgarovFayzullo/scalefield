@@ -2,359 +2,260 @@
 
 import * as React from "react";
 import { useProject } from "@/lib/project-context";
-import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Alert02Icon, RefreshIcon } from "@hugeicons/core-free-icons";
-import { fmtAgo, fmtDuration, useMetric, type Deployment, type DeploymentsData } from "@/lib/status";
+import { Alert02Icon, FilterIcon, RefreshIcon } from "@hugeicons/core-free-icons";
 import {
-  DeploymentStatusBadge,
-  matchesStatusFilter,
-  runState,
-  shortRepo,
-  type StatusFilter,
-} from "@/components/dashboard/deployments-status";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { fmtAgo, useMetric, type Deployment, type DeploymentsData } from "@/lib/status";
+import { environmentOf, runState, shortRepo, type Environment, type RunState } from "@/components/dashboard/deployments-status";
+import { DeploymentRow } from "@/components/dashboard/deployments-row";
 import { DeploymentDetailPanel } from "@/components/dashboard/deployments-detail-panel";
 
 /**
- * Deployments Page
- *
- * Source: GitHub Actions runs of the platform repos (frontend, backend, this
- * panel) via `/api/deployments`, polled every 30 s. Workflow: monitor runs →
- * spot failures → open the run in GitHub for logs / re-run.
+ * Deployments — плотный список строк с фильтрами-пилюлями, по образцу
+ * Vercel: "Add Filter" добавляет размерность (Status/Environment/Author/
+ * Repository), активная пилюля кликается для смены значения или снимается
+ * крестиком. Детали открываются в боковой панели справа.
  */
 
-const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "success", label: "Success" },
-  { value: "failure", label: "Failed" },
-  { value: "in_progress", label: "In Progress" },
-];
+const PAGE_SIZE = 20;
 
-type Summary = {
-  total: number;
-  success: number;
-  failure: number;
-  inProgress: number;
-  avgSuccessDuration: number | null;
+type FilterKind = "status" | "environment" | "author" | "repo";
+const FILTER_LABELS: Record<FilterKind, string> = {
+  status: "Status",
+  environment: "Environment",
+  author: "Author",
+  repo: "Repository",
 };
-
-function summarize(items: Deployment[]): Summary {
-  let success = 0;
-  let failure = 0;
-  let inProgress = 0;
-  let durationSum = 0;
-  let durationCount = 0;
-  for (const d of items) {
-    const state = runState(d);
-    if (state === "success") {
-      success++;
-      if (d.duration_s != null) {
-        durationSum += d.duration_s;
-        durationCount++;
-      }
-    } else if (state === "failure") {
-      failure++;
-    } else if (state === "in_progress" || state === "queued") {
-      inProgress++;
-    }
-  }
-  return {
-    total: items.length,
-    success,
-    failure,
-    inProgress,
-    avgSuccessDuration: durationCount > 0 ? durationSum / durationCount : null,
-  };
-}
+const STATUS_VALUES: RunState[] = ["failure", "success", "in_progress"];
+const STATUS_LABELS: Record<RunState, string> = {
+  success: "Ready",
+  failure: "Error",
+  cancelled: "Cancelled",
+  in_progress: "Building",
+  queued: "Queued",
+  other: "Skipped",
+};
+const ENV_VALUES: Environment[] = ["production", "preview"];
 
 function FilterChip({
-  active,
-  onClick,
-  children,
+  kind,
+  value,
+  options,
+  optionLabel,
+  onChange,
+  onClear,
 }: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
+  kind: FilterKind;
+  value: string;
+  options: string[];
+  optionLabel: (v: string) => string;
+  onChange: (v: string) => void;
+  onClear: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`px-3 py-1 text-sm rounded-md transition-colors cursor-pointer ${
-        active ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function StatCard({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="px-4 py-3 border border-border rounded-lg">
-      <p className="text-xs text-muted-foreground mb-1">{label}</p>
-      <p className={`text-xl font-semibold tabular-nums ${tone ?? ""}`}>{value}</p>
+    <div className="inline-flex items-center gap-1 rounded-full border border-border py-1 pl-3 pr-1.5 text-xs">
+      <span className="text-muted-foreground">{FILTER_LABELS[kind]}</span>
+      <select
+        aria-label={FILTER_LABELS[kind]}
+        className="cursor-pointer border-0 bg-transparent pr-1 font-medium outline-none"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {optionLabel(o)}
+          </option>
+        ))}
+      </select>
+      <button type="button" onClick={onClear} aria-label={`Remove ${FILTER_LABELS[kind]} filter`} className="rounded-full px-1 text-muted-foreground hover:text-foreground">
+        ✕
+      </button>
     </div>
-  );
-}
-
-function SummaryRow({ summary }: { summary: Summary }) {
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-      <StatCard label="Total runs" value={String(summary.total)} />
-      <StatCard label="Successful" value={String(summary.success)} tone="text-green-600" />
-      <StatCard label="Failed" value={String(summary.failure)} tone={summary.failure > 0 ? "text-red-600" : undefined} />
-      <StatCard label="In progress" value={String(summary.inProgress)} tone={summary.inProgress > 0 ? "text-blue-600" : undefined} />
-      <StatCard label="Avg. duration (success)" value={fmtDuration(summary.avgSuccessDuration)} />
-    </div>
-  );
-}
-
-function DeploymentRow({
-  deployment,
-  selected,
-  onClick,
-}: {
-  deployment: Deployment;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  const state = runState(deployment);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full text-left px-4 py-3 border border-border rounded-lg hover:bg-muted/30 transition-colors cursor-pointer ${
-        selected ? "bg-muted/50" : ""
-      }`}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className="text-sm font-medium">{shortRepo(deployment.repo)}</span>
-            <span className="text-xs text-muted-foreground">{deployment.workflow}</span>
-            <DeploymentStatusBadge state={state} />
-          </div>
-          <p className="text-sm text-muted-foreground mb-1 truncate">{deployment.title}</p>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-            <span className="font-mono">{deployment.branch}</span>
-            <span>•</span>
-            <span className="font-mono">{deployment.sha}</span>
-            <span>•</span>
-            <span>{fmtDuration(deployment.duration_s)}</span>
-            <span>•</span>
-            <span className="inline-flex items-center gap-1.5">
-              {deployment.actor_avatar ? (
-                <Image
-                  src={deployment.actor_avatar}
-                  alt=""
-                  width={16}
-                  height={16}
-                  className="h-4 w-4 rounded-full"
-                />
-              ) : null}
-              {deployment.actor || "unknown"}
-            </span>
-          </div>
-        </div>
-        <div className="text-xs text-muted-foreground whitespace-nowrap">
-          {fmtAgo(deployment.created_at)}
-        </div>
-      </div>
-    </button>
   );
 }
 
 function ListSkeleton() {
   return (
-    <>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-        {Array.from({ length: 5 }, (_, i) => (
-          <Skeleton key={i} className="h-[66px] rounded-lg" />
-        ))}
-      </div>
-      <div className="space-y-2">
-        {Array.from({ length: 6 }, (_, i) => (
-          <Skeleton key={i} className="h-[86px] rounded-lg" />
-        ))}
-      </div>
-    </>
+    <div>
+      {Array.from({ length: 8 }, (_, i) => (
+        <div key={i} className="border-b border-border px-4 py-3">
+          <Skeleton className="mb-2 h-4 w-2/3" />
+          <Skeleton className="h-3 w-1/3" />
+        </div>
+      ))}
+    </div>
   );
 }
 
 export default function DeploymentsPage() {
   const { apiBase } = useProject();
-  const { data, error, loading, updatedAt, refresh } = useMetric<DeploymentsData>(
-    `${apiBase}/deployments`,
-    30000,
-  );
-  const [selectedDeployment, setSelectedDeployment] = React.useState<string | null>(null);
-  const [filterStatus, setFilterStatus] = React.useState<StatusFilter>("all");
-  const [filterRepo, setFilterRepo] = React.useState<string>("all");
+  const { data, error, loading, updatedAt, refresh } = useMetric<DeploymentsData>(`${apiBase}/deployments`, 30000);
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [isPanelVisible, setIsPanelVisible] = React.useState(false);
-  const [displayedDeployment, setDisplayedDeployment] = React.useState<string | null>(null);
+  const [displayedId, setDisplayedId] = React.useState<string | null>(null);
+  const [filters, setFilters] = React.useState<Partial<Record<FilterKind, string>>>({});
+  const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
 
   React.useEffect(() => {
-    if (selectedDeployment) {
-      setDisplayedDeployment(selectedDeployment);
+    if (selectedId) {
+      setDisplayedId(selectedId);
       const t = setTimeout(() => setIsPanelVisible(true), 10);
       return () => clearTimeout(t);
     }
     setIsPanelVisible(false);
-    const t = setTimeout(() => setDisplayedDeployment(null), 300);
+    const t = setTimeout(() => setDisplayedId(null), 300);
     return () => clearTimeout(t);
-  }, [selectedDeployment]);
+  }, [selectedId]);
 
   const items = React.useMemo(() => data?.items ?? [], [data]);
+  const repos = React.useMemo(() => Array.from(new Set(items.map((d) => d.repo).filter(Boolean))).sort(), [items]);
+  const authors = React.useMemo(() => Array.from(new Set(items.map((d) => d.actor).filter(Boolean))).sort(), [items]);
 
-  const repos = React.useMemo(() => {
-    const set = new Set<string>();
-    for (const d of items) set.add(d.repo);
-    return Array.from(set).sort();
-  }, [items]);
+  const allKinds: FilterKind[] = React.useMemo(() => {
+    const kinds: FilterKind[] = ["status", "environment"];
+    if (authors.length > 1) kinds.push("author");
+    if (repos.length > 1) kinds.push("repo");
+    return kinds;
+  }, [authors.length, repos.length]);
+  const availableKinds = allKinds.filter((k) => !(k in filters));
 
-  const filteredDeployments = React.useMemo(
+  const filtered = React.useMemo(
     () =>
-      items.filter(
-        (d) =>
-          matchesStatusFilter(runState(d), filterStatus) &&
-          (filterRepo === "all" || d.repo === filterRepo),
-      ),
-    [items, filterStatus, filterRepo],
+      items.filter((d) => {
+        if (filters.status && runState(d) !== filters.status) return false;
+        if (filters.environment && environmentOf(d) !== filters.environment) return false;
+        if (filters.author && d.actor !== filters.author) return false;
+        if (filters.repo && d.repo !== filters.repo) return false;
+        return true;
+      }),
+    [items, filters],
   );
 
-  const summary = React.useMemo(() => summarize(items), [items]);
+  React.useEffect(() => setVisibleCount(PAGE_SIZE), [filters]);
+  const visible = filtered.slice(0, visibleCount);
 
-  const selected = items.find((d) => d.id === displayedDeployment);
+  const addFilter = (kind: FilterKind) => {
+    const first = kind === "status" ? STATUS_VALUES[0] : kind === "environment" ? ENV_VALUES[0] : kind === "author" ? authors[0] : repos[0];
+    if (first) setFilters((f) => ({ ...f, [kind]: first }));
+  };
+  const clearFilter = (kind: FilterKind) =>
+    setFilters((f) => {
+      const next = { ...f };
+      delete next[kind];
+      return next;
+    });
 
+  const selected: Deployment | undefined = items.find((d) => d.id === displayedId);
   const showSkeleton = loading && !data;
   const showError = !!error && !data;
 
   return (
-    <div className="relative flex flex-col md:flex-row h-[calc(100vh-57px)]">
-      {/* Main deployment list */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="px-6 py-6">
-          {/* Header */}
-          <div className="mb-6 flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold mb-1">Deployments</h1>
-              <p className="text-sm text-muted-foreground">
-                {showSkeleton
-                  ? "Loading GitHub Actions runs…"
-                  : `${filteredDeployments.length} of ${items.length} runs${
-                      updatedAt ? ` · updated ${fmtAgo(updatedAt)}` : ""
-                    }`}
-              </p>
-            </div>
-            <Button size="sm" variant="outline" onClick={refresh} disabled={loading && !data}>
-              <HugeiconsIcon icon={RefreshIcon} className="h-4 w-4" />
-              Refresh
-            </Button>
-          </div>
-
-          {/* Non-blocking warnings: poll failure with stale data, per-repo errors */}
-          {error && data ? (
-            <Warning>Refresh failed: {error}. Showing the last successful response.</Warning>
-          ) : null}
-          {data?.errors.map((e) => (
-            <Warning key={e}>{e}</Warning>
-          ))}
-
-          {showSkeleton ? (
-            <ListSkeleton />
-          ) : showError ? (
-            <div className="px-4 py-6 border border-red-500/30 bg-red-500/5 rounded-lg text-sm">
-              <p className="font-medium text-red-600 mb-1">Failed to load deployments</p>
-              <p className="text-muted-foreground mb-3">{error}</p>
-              <Button size="sm" variant="outline" onClick={refresh}>
-                Try again
-              </Button>
-            </div>
-          ) : data && !data.configured ? (
-            <div className="px-4 py-6 border border-border rounded-lg text-sm">
-              <p className="font-medium mb-1">Deployments are not configured</p>
-              <p className="text-muted-foreground">
-                Set <code className="font-mono">GITHUB_REPOS</code> (comma-separated{" "}
-                <code className="font-mono">owner/name</code>) and{" "}
-                <code className="font-mono">GITHUB_TOKEN</code> (actions:read) in the panel
-                environment to show GitHub Actions runs here.
-              </p>
-            </div>
-          ) : (
-            <>
-              <SummaryRow summary={summary} />
-
-              {/* Filters - simple, functional */}
-              <div className="flex items-center gap-2 mb-6 pb-4 border-b border-border flex-wrap">
-                {STATUS_FILTERS.map((f) => (
-                  <FilterChip
-                    key={f.value}
-                    active={filterStatus === f.value}
-                    onClick={() => setFilterStatus(f.value)}
-                  >
-                    {f.label}
-                  </FilterChip>
-                ))}
-                {repos.length > 1 ? (
-                  <>
-                    <span className="mx-1 h-4 w-px bg-border" aria-hidden />
-                    <FilterChip active={filterRepo === "all"} onClick={() => setFilterRepo("all")}>
-                      All repos
-                    </FilterChip>
-                    {repos.map((r) => (
-                      <FilterChip key={r} active={filterRepo === r} onClick={() => setFilterRepo(r)}>
-                        {shortRepo(r)}
-                      </FilterChip>
-                    ))}
-                  </>
-                ) : null}
-              </div>
-
-              {/* Deployment list - vertical flow */}
-              {filteredDeployments.length === 0 ? (
-                <p className="text-sm text-muted-foreground px-4 py-8 text-center">
-                  {items.length === 0 ? "No workflow runs returned by GitHub." : "No runs match the current filters."}
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {filteredDeployments.map((deployment) => (
-                    <DeploymentRow
-                      key={deployment.id}
-                      deployment={deployment}
-                      selected={selectedDeployment === deployment.id}
-                      onClick={() =>
-                        setSelectedDeployment(
-                          selectedDeployment === deployment.id ? null : deployment.id,
-                        )
-                      }
-                    />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
+    <div className="relative flex h-[calc(100vh-3.5rem)] flex-col">
+      <div className="flex items-start justify-between gap-4 px-6 py-5">
+        <div>
+          <h1 className="text-2xl font-semibold">Deployments</h1>
+          <p className="text-sm text-muted-foreground">
+            {showSkeleton ? "Loading…" : `${filtered.length} of ${items.length} runs${updatedAt ? ` · updated ${fmtAgo(updatedAt)}` : ""}`}
+          </p>
         </div>
+        <Button size="sm" variant="outline" onClick={refresh} disabled={loading && !data}>
+          <HugeiconsIcon icon={RefreshIcon} className={loading ? "animate-spin" : undefined} />
+          Refresh
+        </Button>
       </div>
 
-      {selected && (
-        <DeploymentDetailPanel
-          deployment={selected}
-          visible={isPanelVisible}
-          onClose={() => setSelectedDeployment(null)}
-        />
+      {data && data.configured !== false && !showSkeleton && !showError && (
+        <div className="flex flex-wrap items-center gap-2 px-6 pb-4">
+          {availableKinds.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:text-foreground">
+                <HugeiconsIcon icon={FilterIcon} className="h-3.5 w-3.5" />
+                Add Filter
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {availableKinds.map((k) => (
+                  <DropdownMenuItem key={k} onClick={() => addFilter(k)}>
+                    {FILTER_LABELS[k]}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {filters.status && (
+            <FilterChip kind="status" value={filters.status} options={STATUS_VALUES} optionLabel={(v) => STATUS_LABELS[v as RunState]} onChange={(v) => setFilters((f) => ({ ...f, status: v }))} onClear={() => clearFilter("status")} />
+          )}
+          {filters.environment && (
+            <FilterChip kind="environment" value={filters.environment} options={ENV_VALUES} optionLabel={(v) => (v === "production" ? "Production" : "Preview")} onChange={(v) => setFilters((f) => ({ ...f, environment: v }))} onClear={() => clearFilter("environment")} />
+          )}
+          {filters.author && (
+            <FilterChip kind="author" value={filters.author} options={authors as string[]} optionLabel={(v) => v} onChange={(v) => setFilters((f) => ({ ...f, author: v }))} onClear={() => clearFilter("author")} />
+          )}
+          {filters.repo && (
+            <FilterChip kind="repo" value={filters.repo} options={repos as string[]} optionLabel={shortRepo} onChange={(v) => setFilters((f) => ({ ...f, repo: v }))} onClear={() => clearFilter("repo")} />
+          )}
+        </div>
       )}
-    </div>
-  );
-}
 
-function Warning({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-2 mb-4 px-4 py-3 border border-amber-500/30 bg-amber-500/5 rounded-lg text-sm text-amber-700">
-      <HugeiconsIcon icon={Alert02Icon} className="h-4 w-4 mt-0.5 shrink-0" />
-      <span className="break-words min-w-0">{children}</span>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {error && data && (
+          <div className="mx-6 mb-4 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            <HugeiconsIcon icon={Alert02Icon} className="mt-0.5 h-4 w-4 shrink-0" />
+            Refresh failed: {error}. Showing the last successful response.
+          </div>
+        )}
+        {data?.errors.map((e) => (
+          <div key={e} className="mx-6 mb-4 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            <HugeiconsIcon icon={Alert02Icon} className="mt-0.5 h-4 w-4 shrink-0" />
+            {e}
+          </div>
+        ))}
+
+        {showSkeleton ? (
+          <ListSkeleton />
+        ) : showError ? (
+          <div className="mx-6 mt-2 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+            <p className="mb-1 font-medium text-destructive">Failed to load deployments</p>
+            <p className="mb-3 text-muted-foreground">{error}</p>
+            <Button size="sm" variant="outline" onClick={refresh}>
+              Try again
+            </Button>
+          </div>
+        ) : data && data.configured === false ? (
+          <div className="mx-6 mt-2 rounded-lg border border-border p-4 text-sm">
+            <p className="mb-1 font-medium">No deployments yet</p>
+            <p className="text-muted-foreground">
+              Deploy a service from the Services tab, or set <code className="font-mono">GITHUB_TOKEN</code> so this
+              project&apos;s repos show their GitHub Actions runs here.
+            </p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <p className="px-6 py-10 text-center text-sm text-muted-foreground">
+            {items.length === 0 ? "No deployments yet." : "No runs match the current filters."}
+          </p>
+        ) : (
+          <>
+            {visible.map((d) => (
+              <DeploymentRow key={d.id} deployment={d} active={selectedId === d.id} onClick={() => setSelectedId(selectedId === d.id ? null : d.id)} />
+            ))}
+            {visibleCount < filtered.length && (
+              <div className="flex justify-center border-b border-border py-4">
+                <Button size="sm" variant="outline" onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}>
+                  Load More
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {selected && <DeploymentDetailPanel deployment={selected} visible={isPanelVisible} onClose={() => setSelectedId(null)} />}
     </div>
   );
 }

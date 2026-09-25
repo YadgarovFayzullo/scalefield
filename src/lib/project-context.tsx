@@ -11,6 +11,7 @@ export type ProjectContextValue = {
   name: string;
   serverName: string | null;
   contentMetrics: boolean;
+  domains: string[];
   /** База API проекта, например `/api/projects/researcher-uz`. */
   apiBase: string;
   /** База страниц проекта, например `/p/researcher-uz`. */

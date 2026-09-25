@@ -372,6 +372,21 @@ export async function syncDeployment(projectSlug: string, row: DeploymentRow): P
   return updated;
 }
 
+/** Последний деплой каждого проекта — для карточек списка проектов. */
+export async function latestDeployments(projectIds: string[]): Promise<Map<string, DeploymentRow>> {
+  if (projectIds.length === 0) return new Map();
+  const rows = await db
+    .select()
+    .from(schema.deployments)
+    .where(inArray(schema.deployments.projectId, projectIds))
+    .orderBy(desc(schema.deployments.startedAt));
+  const out = new Map<string, DeploymentRow>();
+  for (const r of rows) {
+    if (!out.has(r.projectId)) out.set(r.projectId, r);
+  }
+  return out;
+}
+
 export async function getDeployment(projectSlug: string, projectId: string, externalId: string): Promise<DeploymentRow | null> {
   const rows = await db
     .select()
@@ -422,11 +437,12 @@ export async function removeService(projectSlug: string, projectId: string, id: 
 }
 
 /** Строка deployments → формат панели (общий с прогонами GitHub Actions). */
-export function deploymentToItem(r: DeploymentRow, serviceName: string | null) {
+export function deploymentToItem(r: DeploymentRow, serviceName: string | null, domains: string[] = []) {
   return {
     id: r.externalId,
     source: r.source,
     service: serviceName,
+    domains,
     log: r.log,
     image: r.image,
     repo: r.repo || "",

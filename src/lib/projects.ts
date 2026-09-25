@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { decryptSecret } from "@/lib/secrets";
-import type { Project, Server, Service } from "@/db/schema";
+import type { Domain, Project, Server, Service } from "@/db/schema";
 
 /**
  * Реестр проектов control-plane: то, что раньше жило в env
@@ -12,13 +12,16 @@ import type { Project, Server, Service } from "@/db/schema";
 
 export type ProjectSummary = Project & {
   server: Pick<Server, "id" | "name" | "host" | "provider"> | null;
-  services: Service[];
+  services: (Service & { domains: Domain[] })[];
 };
 
 export async function listProjects(): Promise<ProjectSummary[]> {
   const rows = await db.query.projects.findMany({
     orderBy: [asc(schema.projects.createdAt)],
-    with: { server: { columns: { id: true, name: true, host: true, provider: true } }, services: true },
+    with: {
+      server: { columns: { id: true, name: true, host: true, provider: true } },
+      services: { with: { domains: true } },
+    },
   });
   return rows as ProjectSummary[];
 }
@@ -26,7 +29,10 @@ export async function listProjects(): Promise<ProjectSummary[]> {
 export async function getProject(slug: string): Promise<ProjectSummary | null> {
   const row = await db.query.projects.findFirst({
     where: eq(schema.projects.slug, slug),
-    with: { server: { columns: { id: true, name: true, host: true, provider: true } }, services: true },
+    with: {
+      server: { columns: { id: true, name: true, host: true, provider: true } },
+      services: { with: { domains: true } },
+    },
   });
   return (row as ProjectSummary | undefined) ?? null;
 }
