@@ -55,6 +55,11 @@ class BuildSpec(BaseModel):
     dockerfile: str = Field(default="Dockerfile", max_length=200)
     context: str = Field(default=".", max_length=200)
     build_args: dict[str, str] = Field(default_factory=dict)
+    # Пишется в `.env.production` в корне клонированного репозитория ДО
+    # `docker build` — так Next.js инлайнит NEXT_PUBLIC_* на этапе сборки
+    # (см. researcher-uz .github/workflows/ci.yml), но механизм общий для
+    # любого стека, который сам читает .env.production при сборке.
+    build_env: dict[str, str] = Field(default_factory=dict)
     deploy: DeploySpec
 
 
@@ -232,6 +237,11 @@ async def build_and_deploy(spec: BuildSpec, log: LogFn) -> dict:
     if not dockerfile.exists():
         log(f"ERROR: {spec.dockerfile} not found in {spec.context}")
         return {"ok": False, "stage": "build", "sha": sha}
+
+    if spec.build_env:
+        env_path = workdir / ".env.production"
+        env_path.write_text("".join(f"{k}={v}\n" for k, v in spec.build_env.items()))
+        log(f"wrote {len(spec.build_env)} var(s) to .env.production")
 
     cmd = ["docker", "build", "-f", str(dockerfile), "-t", d.image]
     for k, v in spec.build_args.items():

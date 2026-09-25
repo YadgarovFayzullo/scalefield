@@ -1,0 +1,1 @@
+ALTER TABLE "services" ADD COLUMN "build_env_enc" text;

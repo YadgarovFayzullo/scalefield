@@ -37,6 +37,7 @@ export function ServiceSheet({
   const [dockerfile, setDockerfile] = React.useState("");
   const [context, setContext] = React.useState("");
   const [autoDeploy, setAutoDeploy] = React.useState(false);
+  const [buildEnv, setBuildEnv] = React.useState("");
   const [rotate, setRotate] = React.useState<boolean | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -57,6 +58,7 @@ export function ServiceSheet({
     setDockerfile(service?.dockerfile ?? "");
     setContext(service?.buildContext ?? "");
     setAutoDeploy(service?.autoDeploy ?? false);
+    setBuildEnv(service ? envToText(service.buildEnv) : "");
     setRotate(undefined);
     setError(null);
   }, [open, service]);
@@ -79,6 +81,7 @@ export function ServiceSheet({
       dockerfile: dockerfile.trim() || null,
       buildContext: context.trim() || null,
       autoDeploy,
+      buildEnv: parseEnvText(buildEnv),
       ...(rotate === undefined ? {} : { rotateWebhookSecret: rotate }),
     };
     try {
@@ -149,6 +152,11 @@ export function ServiceSheet({
               <input type="checkbox" checked={autoDeploy} onChange={(e) => setAutoDeploy(e.target.checked)} />
               Auto-deploy on push to the branch (needs the webhook below)
             </label>
+            {field(
+              "Build environment",
+              <Textarea className="min-h-20 font-mono text-xs" value={buildEnv} onChange={(e) => setBuildEnv(e.target.value)} placeholder={"NEXT_PUBLIC_API_URL=https://api.example.com"} />,
+              "Written to .env.production in the repo before the build (Next.js inlines NEXT_PUBLIC_* at build time) — separate from the runtime Environment above.",
+            )}
             <div className="space-y-1 text-xs">
               <div className="font-medium">GitHub webhook</div>
               {service ? (

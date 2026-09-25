@@ -116,6 +116,11 @@ export const services = pgTable(
     branch: text("branch"),
     dockerfile: text("dockerfile"),
     buildContext: text("build_context"),
+    // Переменные, которые нужны САМОЙ сборке (Next.js инлайнит NEXT_PUBLIC_*
+    // из .env.production на этапе `next build`), а не запущенному контейнеру —
+    // отдельно от env_enc (рантайм). Пишутся агентом в .env.production
+    // клонированного репозитория перед `docker build`.
+    buildEnvEnc: text("build_env_enc"),
     autoDeploy: boolean("auto_deploy").notNull().default(false),
     webhookSecretEnc: text("webhook_secret_enc"),
     createdAt: createdAt(),

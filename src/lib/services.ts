@@ -21,8 +21,9 @@ import type { DeploymentRow, Domain, Service } from "@/db/schema";
  * поэтому сервис с доменом попадает в сеть `edge`.
  */
 
-export type ServiceView = Omit<Service, "envEnc" | "webhookSecretEnc"> & {
+export type ServiceView = Omit<Service, "envEnc" | "webhookSecretEnc" | "buildEnvEnc"> & {
   env: Record<string, string>;
+  buildEnv: Record<string, string>;
   domains: string[];
   webhookSecret: string | null;
 };
@@ -48,7 +49,7 @@ function parseEnv(envEnc: string | null): Record<string, string> {
 }
 
 function view(s: Service, domains: Domain[]): ServiceView {
-  const { envEnc, webhookSecretEnc, ...rest } = s;
+  const { envEnc, webhookSecretEnc, buildEnvEnc, ...rest } = s;
   let webhookSecret: string | null = null;
   if (webhookSecretEnc) {
     try {
@@ -60,6 +61,7 @@ function view(s: Service, domains: Domain[]): ServiceView {
   return {
     ...rest,
     env: parseEnv(envEnc),
+    buildEnv: parseEnv(buildEnvEnc),
     domains: domains.filter((d) => d.serviceId === s.id).map((d) => d.hostname),
     webhookSecret,
   };
@@ -102,6 +104,7 @@ export type ServiceInput = {
   repo?: string | null;
   container?: string | null;
   env?: Record<string, string>;
+  buildEnv?: Record<string, string>;
   volumes?: string[];
   domains?: string[];
   branch?: string | null;
@@ -141,6 +144,7 @@ export async function createService(projectId: string, input: ServiceInput): Pro
       command: input.command ?? null,
       repo: input.repo ?? null,
       envEnc: input.env && Object.keys(input.env).length ? encryptSecret(JSON.stringify(input.env)) : null,
+      buildEnvEnc: input.buildEnv && Object.keys(input.buildEnv).length ? encryptSecret(JSON.stringify(input.buildEnv)) : null,
       volumes: input.volumes ?? [],
       branch: input.branch ?? null,
       dockerfile: input.dockerfile ?? null,
@@ -177,6 +181,7 @@ export async function updateService(projectId: string, id: string, input: Servic
   if (input.rotateWebhookSecret === true) patch.webhookSecretEnc = encryptSecret(newSecret());
   if (input.rotateWebhookSecret === false) patch.webhookSecretEnc = null;
   if (input.env !== undefined) patch.envEnc = Object.keys(input.env).length ? encryptSecret(JSON.stringify(input.env)) : null;
+  if (input.buildEnv !== undefined) patch.buildEnvEnc = Object.keys(input.buildEnv).length ? encryptSecret(JSON.stringify(input.buildEnv)) : null;
   if (Object.keys(patch).length) await db.update(schema.services).set(patch).where(eq(schema.services.id, id));
   if (input.domains !== undefined) await setDomains(id, input.domains);
   return (await getService(projectId, id))!;
@@ -314,6 +319,7 @@ export async function buildService(
       ref,
       dockerfile: service.dockerfile || "Dockerfile",
       context: service.buildContext || ".",
+      build_env: service.buildEnv,
       deploy: deploySpec(projectSlug, service, image),
     },
   });

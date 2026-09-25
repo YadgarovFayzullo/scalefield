@@ -22,6 +22,13 @@
       "when": 1790286133314,
       "tag": "0002_build_rollback",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790326843130,
+      "tag": "0003_build_env",
+      "breakpoints": true
     }
   ]
 }

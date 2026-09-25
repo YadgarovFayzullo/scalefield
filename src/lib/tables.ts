@@ -176,6 +176,7 @@ export type ServiceView = {
   autoDeploy: boolean;
   webhookSecret: string | null;
   env: Record<string, string>;
+  buildEnv: Record<string, string>;
   domains: string[];
 };
 
@@ -188,6 +189,7 @@ export type ServiceInput = {
   command?: string | null;
   repo?: string | null;
   env?: Record<string, string>;
+  buildEnv?: Record<string, string>;
   volumes?: string[];
   domains?: string[];
   branch?: string | null;

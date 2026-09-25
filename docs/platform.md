@@ -121,6 +121,13 @@ organizations ─┬─ memberships ── users
   `X-Hub-Signature-256` секретом сервиса; push в ветку при `autoDeploy` →
   сборка. Репозиторий — `owner/name` (GitHub, приватный через `GITHUB_TOKEN`)
   или полный git-URL.
+- [x] Сборочные переменные окружения (25.09): поле «Build environment» у
+  сервиса пишется агентом в `.env.production` репозитория ДО `docker build`
+  (`agent/app/deploy.py`) — Next.js инлайнит `NEXT_PUBLIC_*` при сборке, без
+  этого сборка любого Next-проекта с live-фетчами в `generateStaticParams`
+  падает `ECONNREFUSED` (build-контейнер не видит рантайм-адрес бэкенда).
+  Проверено на реальном `researcher-uz`: сборка с `NEXT_PUBLIC_API_URL`
+  прошла и контейнер поднялся.
 - [ ] Билдер на отдельном хосте + реестр: сервер researcher.uz (2 ГБ) сборку
   Next не потянет; нужен `servers.role = builder`, `docker push` в реестр и
   деплой на целевой сервер.
