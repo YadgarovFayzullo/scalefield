@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowUp02Icon, EyeIcon, GitBranchIcon, GitCommitIcon, MoreHorizontalIcon, Redo02Icon } from "@hugeicons/core-free-icons";
 import { fmtAgo, fmtDuration, type Deployment } from "@/lib/status";
@@ -24,15 +25,7 @@ const DOT_COLOR: Record<string, string> = {
  * таблице Vercel. Последняя колонка резиновая и прижимает время/аватар/«...»
  * к правому краю.
  */
-export function DeploymentRow({
-  deployment: d,
-  active,
-  onClick,
-}: {
-  deployment: Deployment;
-  active: boolean;
-  onClick: () => void;
-}) {
+export function DeploymentRow({ deployment: d, href }: { deployment: Deployment; href: string }) {
   const state = runState(d);
   const config = STATE_CONFIG[state];
   const env = environmentOf(d);
@@ -40,13 +33,9 @@ export function DeploymentRow({
   const isRedeploy = isAgentDeploy && d.workflow === "deploy";
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "grid w-full cursor-pointer grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1.5 border-b border-border px-4 py-3.5 text-left hover:bg-muted/40 sm:grid-cols-[minmax(10rem,26rem)_8.5rem_8rem_11rem_1fr]",
-        active && "bg-muted/60",
-      )}
+    <Link
+      href={href}
+      className="grid w-full grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1.5 border-b border-border px-4 py-3.5 text-left hover:bg-muted/40 sm:grid-cols-[minmax(10rem,26rem)_8.5rem_8rem_11rem_1fr]"
     >
       <span className="col-span-2 min-w-0 truncate text-sm sm:col-span-1" title={d.title}>
         {d.title || (isAgentDeploy ? `${d.service ?? "service"} deploy` : "(no message)")}
@@ -105,6 +94,6 @@ export function DeploymentRow({
         )}
         <HugeiconsIcon icon={MoreHorizontalIcon} className="hidden h-4 w-4 shrink-0 sm:block" />
       </span>
-    </button>
+    </Link>
   );
 }

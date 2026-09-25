@@ -12,10 +12,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { fmtAgo, useMetric, type Deployment, type DeploymentsData } from "@/lib/status";
+import { fmtAgo, useMetric, type DeploymentsData } from "@/lib/status";
 import { environmentOf, runState, shortRepo, STATE_CONFIG, type Environment, type RunState } from "@/components/dashboard/deployments-status";
 import { DeploymentRow } from "@/components/dashboard/deployments-row";
-import { DeploymentDetailPanel } from "@/components/dashboard/deployments-detail-panel";
 
 /**
  * Deployments — плотный список строк с фильтрами-пилюлями, по образцу
@@ -87,24 +86,10 @@ function ListSkeleton() {
 }
 
 export default function DeploymentsPage() {
-  const { apiBase } = useProject();
+  const { apiBase, pathBase } = useProject();
   const { data, error, loading, updatedAt, refresh } = useMetric<DeploymentsData>(`${apiBase}/deployments`, 30000);
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
-  const [isPanelVisible, setIsPanelVisible] = React.useState(false);
-  const [displayedId, setDisplayedId] = React.useState<string | null>(null);
   const [filters, setFilters] = React.useState<Partial<Record<FilterKind, string>>>({});
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
-
-  React.useEffect(() => {
-    if (selectedId) {
-      setDisplayedId(selectedId);
-      const t = setTimeout(() => setIsPanelVisible(true), 10);
-      return () => clearTimeout(t);
-    }
-    setIsPanelVisible(false);
-    const t = setTimeout(() => setDisplayedId(null), 300);
-    return () => clearTimeout(t);
-  }, [selectedId]);
 
   const items = React.useMemo(() => data?.items ?? [], [data]);
   const repos = React.useMemo(() => Array.from(new Set(items.map((d) => d.repo).filter(Boolean))).sort(), [items]);
@@ -144,7 +129,6 @@ export default function DeploymentsPage() {
       return next;
     });
 
-  const selected: Deployment | undefined = items.find((d) => d.id === displayedId);
   const showSkeleton = loading && !data;
   const showError = !!error && !data;
 
@@ -234,7 +218,7 @@ export default function DeploymentsPage() {
         ) : (
           <>
             {visible.map((d) => (
-              <DeploymentRow key={d.id} deployment={d} active={selectedId === d.id} onClick={() => setSelectedId(selectedId === d.id ? null : d.id)} />
+              <DeploymentRow key={d.id} deployment={d} href={`${pathBase}/deployments/${encodeURIComponent(d.id)}`} />
             ))}
             {visibleCount < filtered.length && (
               <div className="flex justify-center border-b border-border py-4">
@@ -247,7 +231,6 @@ export default function DeploymentsPage() {
         )}
       </div>
 
-      {selected && <DeploymentDetailPanel deployment={selected} visible={isPanelVisible} onClose={() => setSelectedId(null)} />}
     </div>
   );
 }
