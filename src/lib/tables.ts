@@ -183,6 +183,7 @@ export type ServiceInput = {
   name?: string;
   kind?: string;
   image?: string | null;
+  container?: string | null;
   port?: number | null;
   command?: string | null;
   repo?: string | null;

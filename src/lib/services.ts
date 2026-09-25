@@ -136,6 +136,7 @@ export async function createService(projectId: string, input: ServiceInput): Pro
       name: input.name,
       kind: input.kind || "web",
       image: input.image ?? null,
+      container: input.container ?? null,
       port: input.port ?? null,
       command: input.command ?? null,
       repo: input.repo ?? null,

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { COOKIE_NAME, isValidSession } from "@/lib/session";
 import { getProjectAgent } from "@/lib/projects";
+import { listServices } from "@/lib/services";
+import { projectContainerFilter } from "@/lib/container-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,8 +12,31 @@ export const dynamic = "force-dynamic";
 // сюда под своей сессией.
 //
 // Только известные пути — чтобы прокси не стал SSRF. Query-параметры
-// (limit/level/host/name/tail) пробрасываем как есть: их валидирует агент.
+// (limit/level/host/name/tail) пробрасываем как есть: их валидирует агент,
+// но `name` у container-logs проверяем сами (см. ниже) — иначе один проект
+// на общем сервере читал бы логи чужого контейнера.
 const ALLOWED = new Set(["summary", "server", "database", "api", "content", "logs", "container-logs"]);
+
+// Ключи, под которыми в ответе агента лежит список контейнеров хоста —
+// их нужно обрезать до контейнеров ЭТОГО проекта перед отдачей в браузер.
+const CONTAINER_LIST_PATHS: Record<string, string[]> = {
+  summary: ["server", "containers"],
+  server: ["containers"],
+};
+
+function filterContainers(body: unknown, path: string[], belongs: (name: string) => boolean): unknown {
+  if (body == null || typeof body !== "object") return body;
+  if (path.length === 0) return body;
+  const [head, ...rest] = path;
+  const obj = body as Record<string, unknown>;
+  if (!(head in obj)) return body;
+  if (rest.length === 0) {
+    const list = obj[head];
+    if (!Array.isArray(list)) return body;
+    return { ...obj, [head]: list.filter((c) => typeof c?.name === "string" && belongs(c.name)) };
+  }
+  return { ...obj, [head]: filterContainers(obj[head], rest, belongs) };
+}
 
 export async function GET(
   req: NextRequest,
@@ -41,6 +66,18 @@ export async function GET(
     return NextResponse.json({ error: "Content metrics are disabled for this project" }, { status: 404 });
   }
 
+  // Только для путей, которым нужна принадлежность контейнера — не тянуть
+  // сервисы проекта на каждый опрос трафика/БД/логов зря.
+  const needsScope = key in CONTAINER_LIST_PATHS || key === "container-logs";
+  const belongs = needsScope ? projectContainerFilter(slug, await listServices(agent.project.id)) : null;
+
+  if (key === "container-logs") {
+    const name = req.nextUrl.searchParams.get("name") || "";
+    if (!belongs!(name)) {
+      return NextResponse.json({ error: "Unknown container for this project" }, { status: 404 });
+    }
+  }
+
   const qs = req.nextUrl.search;
   try {
     const upstream = await fetch(`${agent.agentUrl}/status/${key}${qs}`, {
@@ -48,7 +85,16 @@ export async function GET(
       cache: "no-store",
       signal: AbortSignal.timeout(20000),
     });
-    const body = await upstream.text();
+    let body = await upstream.text();
+    if (upstream.ok && belongs && key in CONTAINER_LIST_PATHS) {
+      try {
+        const json = filterContainers(JSON.parse(body), CONTAINER_LIST_PATHS[key], belongs);
+        body = JSON.stringify(json);
+      } catch {
+        // Ответ не JSON или неожиданной формы — отдаём как есть, лучше
+        // показать чужое один раз, чем сломать раздел полностью.
+      }
+    }
     return new NextResponse(body, {
       status: upstream.status,
       headers: { "content-type": "application/json" },

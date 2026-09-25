@@ -26,6 +26,7 @@ export function ServiceSheet({
   const [name, setName] = React.useState("");
   const [kind, setKind] = React.useState("web");
   const [image, setImage] = React.useState("");
+  const [container, setContainer] = React.useState("");
   const [port, setPort] = React.useState("");
   const [domains, setDomains] = React.useState("");
   const [env, setEnv] = React.useState("");
@@ -45,6 +46,7 @@ export function ServiceSheet({
     setName(service?.name ?? "");
     setKind(service?.kind ?? "web");
     setImage(service?.image ?? "");
+    setContainer(service?.container ?? "");
     setPort(service?.port ? String(service.port) : "");
     setDomains(service?.domains.join("\n") ?? "");
     setEnv(service ? envToText(service.env) : "");
@@ -66,6 +68,7 @@ export function ServiceSheet({
       name: name.trim(),
       kind,
       image: image.trim() || null,
+      container: container.trim() || null,
       port: port.trim() ? Number(port) : null,
       domains: domains.split("\n").map((s) => s.trim()).filter(Boolean),
       env: parseEnvText(env),
@@ -121,6 +124,11 @@ export function ServiceSheet({
             )}
           </div>
           {field("Image", <Input className="h-8 font-mono text-xs" value={image} onChange={(e) => setImage(e.target.value)} placeholder="ghcr.io/org/app:1.2.3" />, "Any registry the server can pull from.")}
+          {field(
+            "Container name",
+            <Input className="h-8 font-mono text-xs" value={container} onChange={(e) => setContainer(e.target.value)} placeholder="auto after first deploy" />,
+            "Only containers matching this project decide what shows in Overview and Monitoring. Set it by hand for something deployed outside Scalefield; a Deploy through this panel fills it in automatically.",
+          )}
           <div className="grid grid-cols-2 gap-2">
             {field("Container port", <Input className="h-8 font-mono text-xs" value={port} onChange={(e) => setPort(e.target.value)} placeholder="3000" />, "With domains: Traefik target. Without: published on 127.0.0.1.")}
             {field("Repository", <Input className="h-8 font-mono text-xs" value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/name" />, "GitHub, for the deployments history.")}
