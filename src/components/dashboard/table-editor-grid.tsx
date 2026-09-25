@@ -450,11 +450,11 @@ function CellEditor({
         }}
       />
       {nullable && (
-        <button data-cell-btn="1" className="rounded border border-border px-1 text-[10px]" title="Set NULL" onMouseDown={(e) => e.preventDefault()} onClick={() => onSave(null)}>
+        <button data-cell-btn="1" className="cursor-pointer rounded border border-border px-1 text-[10px]" title="Set NULL" onMouseDown={(e) => e.preventDefault()} onClick={() => onSave(null)}>
           ∅
         </button>
       )}
-      <button data-cell-btn="1" className="rounded border border-border px-1 text-[10px]" title="Save" onMouseDown={(e) => e.preventDefault()} onClick={() => onSave(value)}>
+      <button data-cell-btn="1" className="cursor-pointer rounded border border-border px-1 text-[10px]" title="Save" onMouseDown={(e) => e.preventDefault()} onClick={() => onSave(value)}>
         ✓
       </button>
     </div>

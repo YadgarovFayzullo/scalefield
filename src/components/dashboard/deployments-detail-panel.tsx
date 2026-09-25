@@ -77,7 +77,7 @@ export function DeploymentDetailPanel({ deployment: initial, visible, onClose }:
         <h2 className="truncate text-sm font-semibold">
           {isAgentDeploy ? deployment.service ?? deployment.workflow : shortRepo(deployment.repo)}
         </h2>
-        <button type="button" onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground">
+        <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer text-muted-foreground hover:text-foreground">
           <HugeiconsIcon icon={Cancel01Icon} className="h-5 w-5" />
         </button>
       </div>

@@ -87,7 +87,7 @@ export function SqlEditor({ slug, apiBase }: { slug: string; apiBase: string }) 
           History
           {history.length > 0 && (
             <button
-              className="text-muted-foreground hover:text-foreground"
+              className="cursor-pointer text-muted-foreground hover:text-foreground"
               title="Clear history"
               onClick={() => {
                 setHistory([]);
@@ -113,7 +113,7 @@ export function SqlEditor({ slug, apiBase }: { slug: string; apiBase: string }) 
                   setQuery(h.q);
                   textareaRef.current?.focus();
                 }}
-                className="block w-full border-b border-border/60 px-3 py-2 text-left hover:bg-muted/50"
+                className="block w-full cursor-pointer border-b border-border/60 px-3 py-2 text-left hover:bg-muted/50"
                 title={h.q}
               >
                 <div className={cn("line-clamp-2 font-mono text-[11px]", !h.ok && "text-destructive")}>{h.q}</div>

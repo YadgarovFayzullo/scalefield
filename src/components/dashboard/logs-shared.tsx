@@ -188,7 +188,7 @@ export function DetailPanel({
     <aside className="w-96 shrink-0 bg-background border-l border-border overflow-auto animate-in slide-in-from-right duration-300">
       <div className="sticky top-0 bg-background border-b border-border p-4 flex items-center justify-between z-10">
         <h3 className="font-semibold">{title}</h3>
-        <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label="Close">
+        <button type="button" onClick={onClose} className="cursor-pointer text-muted-foreground hover:text-foreground" aria-label="Close">
           <HugeiconsIcon icon={Cancel01Icon} className="h-5 w-5" />
         </button>
       </div>

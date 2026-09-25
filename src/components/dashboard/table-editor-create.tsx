@@ -86,7 +86,7 @@ export function CreateTableSheet({
                 <input type="checkbox" checked={c.nullable} disabled={c.pk} onChange={(e) => update(i, { nullable: e.target.checked })} />
                 <Input className="h-7 font-mono text-xs" value={c.default} onChange={(e) => update(i, { default: e.target.value })} />
                 <input type="checkbox" checked={c.pk} onChange={(e) => update(i, { pk: e.target.checked, nullable: e.target.checked ? false : c.nullable })} />
-                <button className="text-muted-foreground hover:text-destructive" title="Remove" onClick={() => setCols((v) => v.filter((_, j) => j !== i))}>
+                <button className="cursor-pointer text-muted-foreground hover:text-destructive" title="Remove" onClick={() => setCols((v) => v.filter((_, j) => j !== i))}>
                   ×
                 </button>
               </div>

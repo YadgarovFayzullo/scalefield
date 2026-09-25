@@ -76,13 +76,13 @@ type StateConfig = {
 
 export const STATE_CONFIG: Record<RunState, StateConfig> = {
   success: {
-    label: "Success",
+    label: "Ready",
     color: "text-green-600",
     bgColor: "bg-green-500/10",
     icon: CheckmarkCircle02Icon,
   },
   failure: {
-    label: "Failed",
+    label: "Error",
     color: "text-red-600",
     bgColor: "bg-red-500/10",
     icon: AlertCircleIcon,
@@ -94,7 +94,7 @@ export const STATE_CONFIG: Record<RunState, StateConfig> = {
     icon: MinusSignCircleIcon,
   },
   in_progress: {
-    label: "In Progress",
+    label: "Building",
     color: "text-blue-600",
     bgColor: "bg-blue-500/10",
     icon: Loading03Icon,

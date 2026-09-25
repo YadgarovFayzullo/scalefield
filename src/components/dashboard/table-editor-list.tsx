@@ -55,7 +55,7 @@ export function TableList({
         <Input placeholder="Search tables…" value={q} onChange={(e) => setQ(e.target.value)} className="h-8 text-sm" />
         <button
           onClick={() => onNewTable(schema)}
-          className="w-full rounded-md border border-dashed border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+          className="w-full cursor-pointer rounded-md border border-dashed border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
         >
           + New table
         </button>
@@ -79,7 +79,7 @@ export function TableList({
                 key={`${t.schema}.${t.name}`}
                 onClick={() => onSelect(t)}
                 className={cn(
-                  "flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted/60",
+                  "flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted/60",
                   active && "bg-muted font-medium",
                 )}
                 title={`${t.schema}.${t.name}`}

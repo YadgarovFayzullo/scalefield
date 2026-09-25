@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { fmtAgo, useMetric, type Deployment, type DeploymentsData } from "@/lib/status";
-import { environmentOf, runState, shortRepo, type Environment, type RunState } from "@/components/dashboard/deployments-status";
+import { environmentOf, runState, shortRepo, STATE_CONFIG, type Environment, type RunState } from "@/components/dashboard/deployments-status";
 import { DeploymentRow } from "@/components/dashboard/deployments-row";
 import { DeploymentDetailPanel } from "@/components/dashboard/deployments-detail-panel";
 
@@ -34,14 +34,6 @@ const FILTER_LABELS: Record<FilterKind, string> = {
   repo: "Repository",
 };
 const STATUS_VALUES: RunState[] = ["failure", "success", "in_progress"];
-const STATUS_LABELS: Record<RunState, string> = {
-  success: "Ready",
-  failure: "Error",
-  cancelled: "Cancelled",
-  in_progress: "Building",
-  queued: "Queued",
-  other: "Skipped",
-};
 const ENV_VALUES: Environment[] = ["production", "preview"];
 
 function FilterChip({
@@ -74,7 +66,7 @@ function FilterChip({
           </option>
         ))}
       </select>
-      <button type="button" onClick={onClear} aria-label={`Remove ${FILTER_LABELS[kind]} filter`} className="rounded-full px-1 text-muted-foreground hover:text-foreground">
+      <button type="button" onClick={onClear} aria-label={`Remove ${FILTER_LABELS[kind]} filter`} className="cursor-pointer rounded-full px-1 text-muted-foreground hover:text-foreground">
         ✕
       </button>
     </div>
@@ -189,7 +181,7 @@ export default function DeploymentsPage() {
             </DropdownMenu>
           )}
           {filters.status && (
-            <FilterChip kind="status" value={filters.status} options={STATUS_VALUES} optionLabel={(v) => STATUS_LABELS[v as RunState]} onChange={(v) => setFilters((f) => ({ ...f, status: v }))} onClear={() => clearFilter("status")} />
+            <FilterChip kind="status" value={filters.status} options={STATUS_VALUES} optionLabel={(v) => STATE_CONFIG[v as RunState].label} onChange={(v) => setFilters((f) => ({ ...f, status: v }))} onClear={() => clearFilter("status")} />
           )}
           {filters.environment && (
             <FilterChip kind="environment" value={filters.environment} options={ENV_VALUES} optionLabel={(v) => (v === "production" ? "Production" : "Preview")} onChange={(v) => setFilters((f) => ({ ...f, environment: v }))} onClear={() => clearFilter("environment")} />
