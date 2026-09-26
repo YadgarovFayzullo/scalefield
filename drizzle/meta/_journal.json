@@ -43,6 +43,13 @@
       "when": 1790459144629,
       "tag": "0005_agent_relay",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790460007084,
+      "tag": "0006_server_install",
+      "breakpoints": true
     }
   ]
 }

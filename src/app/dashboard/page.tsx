@@ -6,7 +6,7 @@ import { latestDeployments, deploymentToItem } from "@/lib/services";
 import { listServersUsage } from "@/lib/servers-usage";
 import { UsageCard } from "@/components/dashboard/usage-card";
 import type { Domain } from "@/db/schema";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { PanelHeader } from "@/components/panel-header";
 import { fmtAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -49,15 +49,7 @@ export default async function ProjectsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="flex items-center justify-between border-b border-border px-6 py-3">
-        <Link href="/dashboard" className="flex items-center gap-3">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm font-bold">
-            S
-          </div>
-          <span className="font-semibold">Scalefield</span>
-        </Link>
-        <ThemeToggle />
-      </header>
+      <PanelHeader active="/dashboard" />
       <main className="mx-auto max-w-5xl px-6 py-10">
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>

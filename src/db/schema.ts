@@ -32,6 +32,12 @@ export const organizations = pgTable("organizations", {
   id: id(),
   slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
+  // SSH-ключ организации: панель ставит агента на сервер по SSH («Добавить
+  // сервер»), пароль root при этом не хранится — вместо него на сервер
+  // кладётся этот ключ, им же делается переустановка. Генерируется при
+  // первом использовании (src/lib/servers.ts).
+  sshPublicKey: text("ssh_public_key"),
+  sshPrivateKeyEnc: text("ssh_private_key_enc"),
   createdAt: createdAt(),
 });
 
@@ -78,6 +84,14 @@ export const servers = pgTable(
     agentVersion: text("agent_version"),
     agentHostname: text("agent_hostname"),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    // Установка агента из панели по SSH: installing → ready | error;
+    // лог установки хранится тут же, чтобы страница сервера показывала его
+    // живьём (поллинг), как страница деплоя — лог задачи агента.
+    status: text("status").notNull().default("ready"), // installing | ready | error
+    sshPort: integer("ssh_port").notNull().default(22),
+    sshUser: text("ssh_user").notNull().default("root"),
+    installLog: text("install_log"),
+    installError: text("install_error"),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("servers_agent_token_hash").on(t.agentTokenHash)],

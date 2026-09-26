@@ -7,10 +7,12 @@
   стоит на том же сервере, что и researcher.uz, — его агент `status-api`.
   Каталог на сервере — `/opt/apps/status`, домены `status.researcher.uz` и
   `relay.researcher.uz` через общий Traefik.
-- **агент клиента** (`agent/docker-compose.yml`): единственное, что стоит на
-  сервере проекта. Держит исходящий WebSocket к relay, входящих портов нет.
-  Каталог — `/opt/scalefield`. Это эталон того, что будет класть на сервер
-  установка из панели («Добавить сервер»).
+- **агент клиента**: единственное, что стоит на сервере проекта. Держит
+  исходящий WebSocket к relay, входящих портов нет. Ставится из панели
+  («Servers → Add server»): control-plane заходит по SSH и кладёт стек в
+  `/opt/scalefield` (compose + `.env`), при необходимости Docker и Traefik в
+  `/opt/apps/traefik`. Скрипт и compose-файлы генерирует
+  `src/lib/agent-install.ts` — единственный источник, руками не дублировать.
 
 ## Образы
 
@@ -58,18 +60,21 @@ Traefik должен писать JSON access-log в `/var/log/traefik/access.lo
 
 ## Агент на сервере клиента
 
-```bash
-ssh root@<сервер> 'mkdir -p /opt/scalefield /opt/apps'
-scp deploy/agent/docker-compose.yml root@<сервер>:/opt/scalefield/
-# /opt/scalefield/.env: SCALEFIELD_RELAY_URL=wss://relay.researcher.uz/agent,
-#   SCALEFIELD_AGENT_TOKEN=<токен из servers.agent_token_enc>, STATUS_DATABASE_URL (если есть Postgres)
-ssh root@<сервер> 'cd /opt/scalefield && docker compose up -d'
-```
+Панель → Servers → Add server: IP, root-пароль (один раз, не хранится) или
+наш публичный ключ, уже положенный в `authorized_keys`. Панель заходит по SSH,
+ставит Docker/Traefik/агента и показывает лог; после установки на сервере
+лежит SSH-ключ организации, им делается «Reinstall agent». Нужны переменные
+control-plane: `RELAY_PUBLIC_URL` (адрес relay глазами клиента,
+`wss://…/agent`), `AGENT_IMAGE` (образ агента в реестре), `ACME_EMAIL`.
 
-Токен агента — тот, что зашифрован в `servers.agent_token_enc`; relay ищет
-сервер по его sha256 (`agent_token_hash`). После подключения в `servers`
-появляются `agent_version`, `agent_hostname`, `last_seen_at`. Пока установка
-руками; кнопка «Добавить сервер» (SSH из панели) — следующий шаг фазы 1.5.
+Токен агента генерируется при добавлении и хранится в
+`servers.agent_token_enc`; relay ищет сервер по его sha256
+(`agent_token_hash`). После подключения в `servers` появляются
+`agent_version`, `agent_hostname`, `last_seen_at`.
+
+Образ агента должен быть доступен серверу клиента: пока реестра нет, на
+Timeweb он переносится `docker save | ssh docker load` под именем из
+`AGENT_IMAGE` (скрипт делает `pull`, а при неудаче берёт локальную копию).
 
 ## Деплой сервисов через панель
 

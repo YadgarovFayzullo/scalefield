@@ -127,13 +127,22 @@ Scalefield стартует как «панель для своего VPS» (м�
   токен агента хранится ещё и хешем (`agent_token_hash`) для поиска relay'ем;
   `agent_version`/`agent_hostname`/`last_seen_at` пишет relay. Проверено
   локально: метрики, ошибки агента, чужой id, рестарт relay с реконнектом.
-- [ ] «Добавить сервер» в панели: IP + root-пароль или наш публичный ключ →
-  control-plane по SSH ставит Docker, Traefik и агента
-  (`deploy/agent/docker-compose.yml` — эталон того, что кладётся на сервер),
-  живой лог как у деплоя, пароль не хранится (на сервер кладётся SSH-ключ
-  организации, шифрованный `secrets.ts`). Одноразовый регистрационный токен →
-  `servers` со статусом pending → агент подключился → ready.
-  `curl … | sh` — тот же скрипт под ссылкой «установить вручную».
+- [x] «Добавить сервер» в панели (`/servers`, 27.09): IP + root-пароль или
+  наш публичный ключ → control-plane по SSH (`ssh2`) ставит Docker (если нет),
+  Traefik (если нет и если попросили; Let's Encrypt, JSON access-log) и стек
+  агента `/opt/scalefield` (`src/lib/agent-install.ts` — скрипт и оба
+  compose-файла генерируются там, руками на сервере ничего не пишется),
+  живой лог в `servers.install_log` (страница `/servers/<id>` поллит его),
+  статус `installing → ready`, когда агент появился в relay, иначе `error`
+  через 90 с. Пароль не хранится: скрипт кладёт в `authorized_keys` SSH-ключ
+  организации (`organizations.ssh_*`, приватный шифрован), им идёт
+  «Reinstall agent». Скрипт запускается как `bash -s` со stdin, весь код в
+  функции с вызовом `main </dev/null` — чтобы `curl | sh` внутри не съел
+  остаток скрипта; секреты только в heredoc'ах. Окружение control-plane:
+  `RELAY_PUBLIC_URL` (адрес relay глазами клиента), `AGENT_IMAGE`,
+  `ACME_EMAIL`. Проверено на sshd-контейнере с docker.sock Docker Desktop:
+  установка по паролю 8 с, переустановка по ключу 4 с, агент в relay.
+  Ограничения: только root (sudo позже), `curl | sh`-вариант ещё не выдаётся.
 - [ ] «Создать сервер» через API хостера (Hetzner, Timeweb Cloud): VM +
   cloud-init с тем же скриптом; токен хостера — клиента, платит он.
 - [ ] База проекта через агента: `project-db.ts`/`project-sql.ts`/
