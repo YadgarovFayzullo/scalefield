@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import psutil
 
@@ -76,7 +77,8 @@ def _containers_sync() -> list[dict]:
 
     out: list[dict] = []
     try:
-        for c in client.containers.list(all=True):
+        containers = client.containers.list(all=True)
+        for c in containers:
             info: dict = {
                 "name": c.name,
                 "status": c.status,  # running / exited / ...
@@ -92,20 +94,30 @@ def _containers_sync() -> list[dict]:
                 info["started_at"] = state.get("StartedAt")
             except Exception:
                 pass
-            # stats только для запущенных — иначе зависает.
-            if c.status == "running":
-                try:
-                    s = c.stats(stream=False)
-                    info["cpu_pct"] = _docker_cpu_pct(s)
-                    mem = s.get("memory_stats", {})
-                    used = mem.get("usage")
-                    limit = mem.get("limit")
-                    info["mem_used"] = used
-                    if used and limit:
-                        info["mem_pct"] = round(used / limit * 100, 1)
-                except Exception:
-                    pass
             out.append(info)
+
+        # stats только для запущенных — иначе зависает. Один `stats(stream=False)`
+        # — это два замера с секундной паузой (~2 с): на проде с десятью
+        # контейнерами последовательный обход занимал 20 с и ручка не
+        # укладывалась в таймаут панели, поэтому снимаем параллельно.
+        def fill_stats(pair: tuple[dict, object]) -> None:
+            info, c = pair
+            try:
+                s = c.stats(stream=False)  # type: ignore[attr-defined]
+                info["cpu_pct"] = _docker_cpu_pct(s)
+                mem = s.get("memory_stats", {})
+                used = mem.get("usage")
+                limit = mem.get("limit")
+                info["mem_used"] = used
+                if used and limit:
+                    info["mem_pct"] = round(used / limit * 100, 1)
+            except Exception:
+                pass
+
+        running = [(info, c) for info, c in zip(out, containers) if c.status == "running"]
+        if running:
+            with ThreadPoolExecutor(max_workers=min(16, len(running))) as pool:
+                list(pool.map(fill_stats, running))
     except Exception:
         return out
     finally:
