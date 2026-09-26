@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Readable } from "node:stream";
 import { COOKIE_NAME, isValidSession } from "@/lib/session";
 import { buildSelect, getProjectDatabase } from "@/lib/project-db";
 import { dbError } from "../../../route";
@@ -7,9 +6,10 @@ import { dbError } from "../../../route";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Экспорт таблицы в CSV потоком через COPY … TO STDOUT: строки не собираются
-// в памяти, поэтому и 6 тыс. статей с аннотациями уходят без проблем.
-// Фильтр и сортировка — те же query-параметры, что у страницы строк.
+// Экспорт таблицы в CSV: агент сервера базы гонит `COPY … TO STDOUT` и
+// отдаёт файл целиком (через relay он идёт одним сообщением, поэтому агент
+// ограничивает его 48 МБ — больше просят сузить фильтром). Фильтр и
+// сортировка — те же query-параметры, что у страницы строк.
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ slug: string; schema: string; table: string }> },
@@ -26,12 +26,9 @@ export async function GET(
       dir: sp.get("dir") === "desc" ? "desc" : "asc",
       filter: parseFilter(sp),
     });
-    // COPY не принимает параметры — подставляем литералы через квотирование
-    // драйвера-независимым способом (все значения — строки).
-    const inlined = query.replace(/\$(\d+)::/g, (_, n) => `${literal(values[Number(n) - 1])}::`).replace(/\$(\d+)/g, (_, n) => literal(values[Number(n) - 1]));
-    const stream = await sql.unsafe(`copy (${inlined}) to stdout with csv header`).readable();
+    const csv = await sql.exportCsv(query, values);
     const filename = `${schema}.${table}.csv`;
-    return new NextResponse(Readable.toWeb(stream) as ReadableStream, {
+    return new NextResponse(csv, {
       headers: {
         "content-type": "text/csv; charset=utf-8",
         "content-disposition": `attachment; filename="${filename.replace(/["\r\n]/g, "")}"`,
@@ -40,11 +37,6 @@ export async function GET(
   } catch (e) {
     return dbError(e);
   }
-}
-
-function literal(v: unknown): string {
-  const s = v === undefined || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
-  return "'" + s.replace(/'/g, "''") + "'";
 }
 
 function parseFilter(sp: URLSearchParams) {

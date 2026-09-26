@@ -1,6 +1,6 @@
 import "server-only";
-import type postgres from "postgres";
 import { describeTable, ProjectDbError, qi, type ColumnInfo } from "@/lib/project-db";
+import type { ProjectSql } from "@/lib/project-conn";
 
 /**
  * Правка схемы из редактора таблиц: колонки, индексы, создание и удаление
@@ -13,7 +13,7 @@ import { describeTable, ProjectDbError, qi, type ColumnInfo } from "@/lib/projec
  *    без выражений не задать.
  */
 
-type Sql = ReturnType<typeof postgres>;
+type Sql = ProjectSql;
 
 export type IndexInfo = { name: string; definition: string; unique: boolean; primary: boolean; size_bytes: number };
 export type NewColumn = { name: string; type: string; nullable?: boolean; default?: string | null; pk?: boolean };
@@ -35,7 +35,7 @@ export async function validateType(sql: Sql, type: string): Promise<string> {
   if (!m) throw new ProjectDbError(`Invalid type: ${type}`);
   const base = m[1].trim().toLowerCase();
   if (SERIALS.has(base) && !m[2] && !m[4]) return base;
-  const rows = await sql.unsafe("select format_type($1::regtype, null) as t", [base]);
+  const rows = await sql.unsafe("select format_type(($1::text)::regtype, null) as t", [base]);
   const canonical = String(rows[0].t);
   return canonical + (m[2] ? m[2].replace(/\s+/g, "") : "") + (m[4] ? "[]" : "");
 }

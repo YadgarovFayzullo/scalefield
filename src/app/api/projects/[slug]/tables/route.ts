@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { COOKIE_NAME, isValidSession } from "@/lib/session";
 import { getProjectDatabase, listTables, ProjectDbError } from "@/lib/project-db";
+import { AgentError } from "@/lib/agent";
 import { createTable, type NewColumn } from "@/lib/project-schema";
 
 export const runtime = "nodejs";
@@ -40,7 +41,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
 }
 
 export function dbError(e: unknown) {
-  if (e instanceof ProjectDbError) return NextResponse.json({ error: e.message }, { status: e.status });
+  // AgentError со статусом 400 — это ошибка Postgres, пересказанная агентом
+  // (синтаксис, нарушение ограничения); остальные — недоступность агента.
+  if (e instanceof ProjectDbError || e instanceof AgentError) return NextResponse.json({ error: e.message }, { status: e.status });
   const msg = e instanceof Error ? e.message : String(e);
   return NextResponse.json({ error: msg }, { status: 502 });
 }

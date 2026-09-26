@@ -30,6 +30,7 @@ from app.deploy import (
 )
 from app.jobs import get_job, start_job
 from app.db import close_pool, get_pool
+from app.dbproxy import router as db_router
 from app.security import require_token
 from app.tunnel import start_tunnel, stop_tunnel
 
@@ -44,6 +45,9 @@ app.add_middleware(
 )
 
 _STARTED_AT = time.time()
+
+# База проекта для редактора таблиц / SQL / схемы (app/dbproxy.py) — под тем же токеном.
+app.include_router(db_router, dependencies=[Depends(require_token)])
 
 
 @app.on_event("startup")

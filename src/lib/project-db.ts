@@ -1,19 +1,20 @@
 import "server-only";
-import postgres from "postgres";
 import { and, asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { decryptSecret } from "@/lib/secrets";
+import { agentRef } from "@/lib/agent";
+import { agentSql, type ProjectSql, type SqlParam } from "@/lib/project-conn";
 
 /**
  * Доступ к базе проекта для редактора таблиц (аналог Table Editor в Supabase).
  *
- * Control-plane подключается к базе проекта напрямую по строке из
- * `databases.url_enc` (контейнер `web` стоит в docker-сети бэкенда, локально —
- * localhost:5432). Все запросы параметризованы; идентификаторы (схема,
- * таблица, колонка) берутся ТОЛЬКО из каталога и квотируются `qi()`, а
- * значения приводятся к типу колонки явным `::type` из `format_type` — иначе
- * postgres.js отправил бы строку как text и Postgres отказал бы integer/jsonb
- * колонкам.
+ * Запросы исполняет агент сервера, на котором стоит база (`/db/exec`,
+ * src/lib/project-conn.ts): у клиента Postgres наружу не смотрит. Строка
+ * подключения — из `databases.url_enc`, уезжает агенту в запросе.
+ * Все запросы параметризованы; идентификаторы (схема, таблица, колонка)
+ * берутся ТОЛЬКО из каталога и квотируются `qi()`, а значения приводятся к
+ * типу колонки явным `($n::text)::type` из `format_type` — параметры едут
+ * строками, и Postgres сам разбирает их в integer/jsonb/uuid.
  */
 
 export type TableInfo = {
@@ -62,8 +63,6 @@ export const MAX_LIMIT = 200;
 /** До этого числа строк count(*) считаем точно, дальше — оценка планировщика. */
 const EXACT_COUNT_MAX = 200_000;
 
-const pools = new Map<string, ReturnType<typeof postgres>>();
-
 export function qi(name: string): string {
   return '"' + name.replace(/"/g, '""') + '"';
 }
@@ -90,33 +89,29 @@ export async function getProjectDatabase(slug: string, dbId?: string) {
   const database = rows[0];
   if (!database) throw new ProjectDbError("Project has no database registered", 404);
   if (!database.urlEnc) throw new ProjectDbError("Database has no connection string", 409);
-  let sql = pools.get(database.id);
-  if (!sql) {
-    sql = postgres(decryptSecret(database.urlEnc), {
-      max: 3,
-      prepare: false,
-      idle_timeout: 60,
-      connect_timeout: 10,
-    });
-    pools.set(database.id, sql);
-  }
+  // Агент — сервера базы, а если у базы он не указан, сервера проекта.
+  const serverId = database.serverId ?? project.serverId;
+  if (!serverId) throw new ProjectDbError("Database has no server with an agent", 409);
+  const server = await db.query.servers.findFirst({ where: eq(schema.servers.id, serverId) });
+  if (!server) throw new ProjectDbError("Database server not found", 409);
+  const sql = agentSql(agentRef(server), decryptSecret(database.urlEnc));
   return { project, database, sql };
 }
 
-type Sql = ReturnType<typeof postgres>;
-type Params = NonNullable<Parameters<Sql["unsafe"]>[1]>;
-type Param = Params[number];
+type Sql = ProjectSql;
+type Params = SqlParam[];
+type Param = SqlParam;
 
-/**
- * Значение для параметра, привязанного к `$n::<type>`. postgres.js берёт тип
- * параметра из описания запроса и для json/jsonb сериализует значение через
- * JSON.stringify — строка `{"k":1}` превратилась бы в JSON-строку `"{\"k\":1}"`.
- * Поэтому для json-колонок передаём разобранный объект.
- */
+/** Каст параметра к типу колонки: параметр едет строкой, разбирает его Postgres. */
+function cast(n: number, type: string): string {
+  return `($${n}::text)::${type}`;
+}
+
+/** Значение для параметра, привязанного к `($n::text)::<type>` — всегда строка; JSON проверяем заранее. */
 function paramFor(col: ColumnInfo, value: string): Param {
   if (col.type === "json" || col.type === "jsonb") {
     try {
-      return JSON.parse(value) as Param;
+      JSON.parse(value);
     } catch {
       throw new ProjectDbError(`Column ${col.name}: invalid JSON`);
     }
@@ -169,7 +164,7 @@ export async function describeTable(sql: Sql, schemaName: string, table: string)
      from pg_attribute a
      left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
      left join pg_index i on i.indrelid = a.attrelid and i.indisprimary
-     where a.attrelid = $1::regclass and a.attnum > 0 and not a.attisdropped
+     where a.attrelid = ($1::text)::regclass and a.attnum > 0 and not a.attisdropped
      order by a.attnum`,
     [qi(schemaName) + "." + qi(table)],
   );
@@ -231,7 +226,7 @@ function buildWhere(
     return ` where ${qi(col.name)}::text ILIKE $${params.length}`;
   }
   params.push(paramFor(col, filter.value));
-  return ` where ${qi(col.name)} ${op} $${params.length}::${col.type}`;
+  return ` where ${qi(col.name)} ${op} ${cast(params.length, col.type)}`;
 }
 
 /** SELECT для страницы строк и для экспорта: WHERE/ORDER BY без LIMIT. */
@@ -301,7 +296,7 @@ function pkPredicate(columns: ColumnInfo[], pkValues: Record<string, CellValue>,
     const v = pkValues[c.name];
     if (v === null) return `${qi(c.name)} IS NULL`;
     params.push(paramFor(c, v));
-    return `${qi(c.name)} = $${params.length}::${c.type}`;
+    return `${qi(c.name)} = ${cast(params.length, c.type)}`;
   });
   return parts.join(" AND ");
 }
@@ -323,7 +318,7 @@ export async function updateRow(
     const v = set[n];
     if (v === null) return `${qi(col.name)} = NULL`;
     params.push(paramFor(col, v));
-    return `${qi(col.name)} = $${params.length}::${col.type}`;
+    return `${qi(col.name)} = ${cast(params.length, col.type)}`;
   });
   const where = pkPredicate(columns, pkValues, params);
   const rows = await sql.unsafe(
@@ -356,7 +351,7 @@ export async function insertRow(
       const v = values[n];
       if (v === null) return "NULL";
       params.push(paramFor(col, v));
-      return `$${params.length}::${col.type}`;
+      return cast(params.length, col.type);
     });
     query = `insert into ${rel} (${cols.join(", ")}) values (${vals.join(", ")}) returning *`;
   }
@@ -375,14 +370,12 @@ export async function deleteRows(
   await resolveTable(sql, schemaName, table);
   const columns = await describeTable(sql, schemaName, table);
   const rel = `${qi(schemaName)}.${qi(table)}`;
-  let deleted = 0;
-  await sql.begin(async (tx) => {
-    for (const k of keys) {
-      const params: Params = [];
-      const where = pkPredicate(columns, k, params);
-      const res = await tx.unsafe(`delete from ${rel} where ${where}`, params);
-      deleted += res.count;
-    }
+  // Все удаления — одной транзакцией на агенте: либо все, либо ни одного.
+  const statements = keys.map((k) => {
+    const params: Params = [];
+    const where = pkPredicate(columns, k, params);
+    return { sql: `delete from ${rel} where ${where}`, params };
   });
-  return deleted;
+  const res = await sql.exec(statements);
+  return res.statements.reduce((n, s) => n + s.row_count, 0);
 }
