@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.collectors.api_traffic import collect_access_logs, collect_api_traffic
+from app.collectors.visitors import collect_visitors
 from app.collectors.content import collect_content
 from app.collectors.database import collect_database
 from app.collectors.server import collect_container_logs, collect_server
@@ -105,6 +106,19 @@ async def server() -> dict:
 @app.get("/status/database", dependencies=[Depends(require_token)])
 async def database() -> dict:
     return await collect_database()
+
+
+@app.get("/status/visitors", dependencies=[Depends(require_token)])
+async def visitors(
+    days: int = Query(7, ge=1, le=30),
+    hosts: str = Query(""),
+) -> dict:
+    """Посетители, просмотры страниц, bounce rate, топ страниц/источников,
+    устройства — за `days` дней (по умолчанию неделя, как в Vercel Analytics).
+    `hosts` — список через запятую, чтобы на общем сервере проект видел
+    только свой трафик (тот же принцип, что и `/status/logs?host=`)."""
+    host_list = tuple(h.strip() for h in hosts.split(",") if h.strip()) or None
+    return await collect_visitors(days, host_list)
 
 
 @app.get("/status/api", dependencies=[Depends(require_token)])

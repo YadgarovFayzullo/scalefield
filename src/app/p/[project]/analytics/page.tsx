@@ -3,8 +3,8 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ReloadIcon, Time01Icon } from "@hugeicons/core-free-icons";
-import { fmtTime, useMetric, type ApiData, type ContentData } from "@/lib/status";
+import { ComputerIcon, Globe02Icon, ReloadIcon, Time01Icon, WifiConnected01Icon } from "@hugeicons/core-free-icons";
+import { fmtTime, useMetric, type ApiData, type ContentData, type VisitorsData } from "@/lib/status";
 import { AnalyticsContentSkeleton, AnalyticsError, AnalyticsTrafficSkeleton } from "@/components/dashboard/analytics-states";
 import {
   HostsList,
@@ -15,6 +15,15 @@ import {
   TrafficStats,
 } from "@/components/dashboard/analytics-traffic";
 import { ArticlesByType, ContentStats, TopArticles } from "@/components/dashboard/analytics-content";
+import {
+  BreakdownCard,
+  ReferrersCard,
+  TopPagesCard,
+  VisitorsChart,
+  VisitorsNotConfigured,
+  VisitorStats,
+  VisitorStatsSkeleton,
+} from "@/components/dashboard/analytics-visitors";
 
 /**
  * Analytics Page
@@ -31,14 +40,16 @@ import { ArticlesByType, ContentStats, TopArticles } from "@/components/dashboar
  * EXCEPTION: Using cards for statistics (Supabase-style)
  */
 export default function AnalyticsPage() {
+  const visitors = useMetric<VisitorsData>("visitors?days=7", 60000);
   const api = useMetric<ApiData>("api", 30000);
   const content = useMetric<ContentData>("content", 60000);
 
-  const updatedAt = api.updatedAt ?? content.updatedAt;
+  const updatedAt = visitors.updatedAt ?? api.updatedAt ?? content.updatedAt;
   const windowHours = api.data?.configured ? (api.data.window_hours ?? 24) : null;
   const refreshing = api.loading || content.loading;
 
   const refresh = () => {
+    visitors.refresh();
     api.refresh();
     content.refresh();
   };
@@ -73,6 +84,12 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
+      {/* Visitors */}
+      <section className="mb-10">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-4">Visitors · last 7 days</h2>
+        <VisitorsSection state={visitors} />
+      </section>
+
       {/* Traffic */}
       <section className="mb-10">
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-4">Traffic</h2>
@@ -84,6 +101,34 @@ export default function AnalyticsPage() {
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-4">Content</h2>
         <ContentSection state={content} />
       </section>
+    </div>
+  );
+}
+
+function VisitorsSection({ state }: { state: ReturnType<typeof useMetric<VisitorsData>> }) {
+  const { data, error, loading, refresh } = state;
+
+  if (!data) {
+    if (loading) return <VisitorStatsSkeleton />;
+    return <AnalyticsError title="Visitor metrics unavailable" message={error ?? "Unknown error"} onRetry={refresh} />;
+  }
+
+  if (!data.configured) return <VisitorsNotConfigured />;
+
+  return (
+    <div className="space-y-4">
+      {error ? <AnalyticsError title="Latest refresh failed — showing previous data" message={error} onRetry={refresh} /> : null}
+      <VisitorStats data={data} />
+      <VisitorsChart series={data.series ?? []} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <TopPagesCard pages={data.top_pages ?? []} />
+        <ReferrersCard data={data} />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <BreakdownCard title="Devices" icon={ComputerIcon} items={data.devices ?? []} />
+        <BreakdownCard title="Browsers" icon={Globe02Icon} items={data.browsers ?? []} />
+        <BreakdownCard title="Operating Systems" icon={WifiConnected01Icon} items={data.operating_systems ?? []} />
+      </div>
     </div>
   );
 }

@@ -131,6 +131,22 @@ export type ContentData = {
   latest: { id: number; title: string; publication_type: string; created_at: string }[];
 };
 
+export type VisitorsData = {
+  configured: boolean;
+  window_days?: number;
+  visitors?: number;
+  page_views?: number;
+  bounce_rate?: number; // доля 0..1
+  changes?: { visitors: number | null; page_views: number | null; bounce_rate: number | null };
+  series?: { day: number; visitors: number; views: number }[];
+  top_pages?: { path: string; views: number; visitors: number }[];
+  referrers?: { referrer: string; count: number }[];
+  referrer_capture_available?: boolean;
+  devices?: { name: string; count: number }[];
+  browsers?: { name: string; count: number }[];
+  operating_systems?: { name: string; count: number }[];
+};
+
 export type SummaryData = {
   ts: number;
   api_uptime_s: number;

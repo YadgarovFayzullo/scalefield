@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 // (limit/level/host/name/tail) пробрасываем как есть: их валидирует агент,
 // но `name` у container-logs проверяем сами (см. ниже) — иначе один проект
 // на общем сервере читал бы логи чужого контейнера.
-const ALLOWED = new Set(["summary", "server", "database", "api", "content", "logs", "container-logs"]);
+const ALLOWED = new Set(["summary", "server", "database", "api", "content", "logs", "container-logs", "visitors"]);
 
 // Ключи, под которыми в ответе агента лежит список контейнеров хоста —
 // их нужно обрезать до контейнеров ЭТОГО проекта перед отдачей в браузер.
@@ -78,7 +78,16 @@ export async function GET(
     }
   }
 
-  const qs = req.nextUrl.search;
+  const qsParams = new URLSearchParams(req.nextUrl.search);
+  // Визиты общего сервера режем до доменов ЭТОГО проекта — иначе на общем
+  // сервере "Visitors" одного проекта показывал бы трафик другого (тот же
+  // принцип, что и у container-scope, только по хосту, а не по имени
+  // контейнера).
+  if (key === "visitors") {
+    const domains = (await listServices(agent.project.id)).flatMap((s) => s.domains);
+    if (domains.length > 0) qsParams.set("hosts", domains.join(","));
+  }
+  const qs = qsParams.toString() ? `?${qsParams.toString()}` : "";
   try {
     const upstream = await fetch(`${agent.agentUrl}/status/${key}${qs}`, {
       headers: { "X-Status-Token": agent.agentToken },

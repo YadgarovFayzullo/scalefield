@@ -67,6 +67,13 @@ def _parse_record(rec: dict) -> dict | None:
             "size": size if isinstance(size, int) else 0,
             "ua": rec.get("request_User-Agent") or "",
             "router": rec.get("RouterName") or "",
+            # Referer не включён в прод-конфиг Traefik (только User-Agent) —
+            # ключа не будет в JSON вовсе, пока не добавят
+            # --accesslog.fields.headers.names.Referer=keep. Отличаем «нет
+            # заголовка» от «заголовок пуст», иначе аналитика источников
+            # перехода выглядела бы как «весь трафик прямой».
+            "referrer": rec.get("request_Referer") or None,
+            "has_referrer_field": "request_Referer" in rec,
         }
 
     status = rec.get("status")  # Caddy
@@ -78,6 +85,7 @@ def _parse_record(rec: dict) -> dict | None:
     headers = req.get("headers", {}) or {}
     ua = headers.get("User-Agent") or []
     size = rec.get("size")
+    referrer = headers.get("Referer")
     return {
         "ts": _parse_ts(rec.get("ts")),
         "status": status,
@@ -89,6 +97,8 @@ def _parse_record(rec: dict) -> dict | None:
         "size": size if isinstance(size, int) else 0,
         "ua": ua[0] if isinstance(ua, list) and ua else "",
         "router": "",
+        "referrer": (referrer[0] if isinstance(referrer, list) and referrer else referrer) or None,
+        "has_referrer_field": "Referer" in headers,
     }
 
 
