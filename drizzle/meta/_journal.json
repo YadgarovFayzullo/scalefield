@@ -29,6 +29,13 @@
       "when": 1790326843130,
       "tag": "0003_build_env",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790421075346,
+      "tag": "0004_page_views",
+      "breakpoints": true
     }
   ]
 }

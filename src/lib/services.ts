@@ -86,6 +86,24 @@ export async function getService(projectId: string, id: string): Promise<Service
 }
 
 /** Для webhook: сервис по id вместе с проектом (без сессии — подпись проверяется секретом). */
+/** Проект-владелец домена — так публичный /api/collect узнаёт, чей это визит,
+ * без токена в клиентском коде (тот же принцип, что у Vercel Analytics:
+ * компонент ничего не настраивает, площадка узнаётся по адресу страницы). */
+export async function getProjectByDomain(hostname: string): Promise<{ id: string; slug: string } | null> {
+  const row = await db
+    .select({ projectId: schema.services.projectId })
+    .from(schema.domains)
+    .innerJoin(schema.services, eq(schema.services.id, schema.domains.serviceId))
+    .where(eq(schema.domains.hostname, hostname.toLowerCase()))
+    .limit(1);
+  if (!row[0]) return null;
+  const project = await db.query.projects.findFirst({
+    where: eq(schema.projects.id, row[0].projectId),
+    columns: { id: true, slug: true },
+  });
+  return project ?? null;
+}
+
 export async function getServiceForHook(id: string): Promise<{ service: ServiceView; project: { id: string; slug: string } } | null> {
   const rows = await db.select().from(schema.services).where(eq(schema.services.id, id)).limit(1);
   if (!rows[0]) return null;

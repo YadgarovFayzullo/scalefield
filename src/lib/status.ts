@@ -145,6 +145,7 @@ export type VisitorsData = {
   devices?: { name: string; count: number }[];
   browsers?: { name: string; count: number }[];
   operating_systems?: { name: string; count: number }[];
+  source?: "script" | "logs";
 };
 
 export type SummaryData = {

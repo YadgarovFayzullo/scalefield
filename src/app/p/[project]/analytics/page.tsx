@@ -2,9 +2,11 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ComputerIcon, Globe02Icon, ReloadIcon, Time01Icon, WifiConnected01Icon } from "@hugeicons/core-free-icons";
 import { fmtTime, useMetric, type ApiData, type ContentData, type VisitorsData } from "@/lib/status";
+import { useProject } from "@/lib/project-context";
 import { AnalyticsContentSkeleton, AnalyticsError, AnalyticsTrafficSkeleton } from "@/components/dashboard/analytics-states";
 import {
   HostsList,
@@ -39,8 +41,16 @@ import {
  *
  * EXCEPTION: Using cards for statistics (Supabase-style)
  */
+const RANGE_OPTIONS = [
+  { value: "1", label: "Last 24 Hours" },
+  { value: "7", label: "Last 7 Days" },
+  { value: "30", label: "Last 30 Days" },
+];
+
 export default function AnalyticsPage() {
-  const visitors = useMetric<VisitorsData>("visitors?days=7", 60000);
+  const [range, setRange] = React.useState("7");
+  const { apiBase } = useProject();
+  const visitors = useMetric<VisitorsData>(`${apiBase}/analytics/visitors?days=${range}`, 60000);
   const api = useMetric<ApiData>("api", 30000);
   const content = useMetric<ContentData>("content", 60000);
 
@@ -62,7 +72,27 @@ export default function AnalyticsPage() {
           <h1 className="text-xl sm:text-2xl font-semibold mb-1">Analytics</h1>
           <p className="text-sm text-muted-foreground">Traffic, performance and content usage metrics</p>
         </div>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <Select value="production" onValueChange={() => {}}>
+            <SelectTrigger size="sm" className="w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="production">Production</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={range} onValueChange={(v) => setRange(v ?? "7")}>
+            <SelectTrigger size="sm" className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {RANGE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {windowHours != null ? (
             <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted text-foreground font-medium">
               <HugeiconsIcon icon={Time01Icon} className="h-3.5 w-3.5" />
@@ -86,7 +116,7 @@ export default function AnalyticsPage() {
 
       {/* Visitors */}
       <section className="mb-10">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-4">Visitors · last 7 days</h2>
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-4">Visitors · {RANGE_OPTIONS.find((o) => o.value === range)?.label.toLowerCase()}</h2>
         <VisitorsSection state={visitors} />
       </section>
 
@@ -118,6 +148,12 @@ function VisitorsSection({ state }: { state: ReturnType<typeof useMetric<Visitor
   return (
     <div className="space-y-4">
       {error ? <AnalyticsError title="Latest refresh failed — showing previous data" message={error} onRetry={refresh} /> : null}
+      {data.source === "logs" && (
+        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          Estimated from the server proxy log. Add the <code className="font-mono">&lt;Analytics /&gt;</code> tracker
+          to this project for exact, script-based numbers (also catches client-side route changes the log can&apos;t see).
+        </div>
+      )}
       <VisitorStats data={data} />
       <VisitorsChart series={data.series ?? []} />
       <div className="grid gap-4 lg:grid-cols-2">

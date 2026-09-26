@@ -14,6 +14,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -198,6 +199,29 @@ export const buckets = pgTable("buckets", {
   createdAt: createdAt(),
 });
 
+// События просмотра страницы от клиентского трекера (`<Analytics />`,
+// см. scalefield-analytics.tsx) — POST /api/collect с сайта проекта. В
+// отличие от разбора access-лога прокси (agent/status/visitors), ловит
+// клиентские SPA-переходы и не требует доступа к логам прокси вообще:
+// проект просто ставит компонент в layout. `visitorHash` — не IP, а его
+// необратимый хеш (соль + IP + UA + сутки), чтобы считать уникальных
+// посетителей, не храня ничего похожего на личные данные.
+export const pageViews = pgTable(
+  "page_views",
+  {
+    id: id(),
+    projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    referrer: text("referrer"),
+    visitorHash: text("visitor_hash").notNull(),
+    device: text("device"),
+    browser: text("browser"),
+    os: text("os"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("page_views_project_created").on(t.projectId, t.createdAt)],
+);
+
 export type Organization = typeof organizations.$inferSelect;
 export type Server = typeof servers.$inferSelect;
 export type Project = typeof projects.$inferSelect;
@@ -206,3 +230,4 @@ export type Domain = typeof domains.$inferSelect;
 export type DeploymentRow = typeof deployments.$inferSelect;
 export type Database = typeof databases.$inferSelect;
 export type Bucket = typeof buckets.$inferSelect;
+export type PageView = typeof pageViews.$inferSelect;
