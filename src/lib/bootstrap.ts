@@ -1,27 +1,31 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { encryptSecret } from "@/lib/secrets";
+import { decryptSecret, encryptSecret } from "@/lib/secrets";
+import { hashAgentToken } from "@/lib/agent-token";
 
 /**
  * Первичное заполнение control-plane из env, чтобы существующая установка
  * (один сервер, один проект) поднялась без ручного SQL. Идемпотентно: если
  * организация уже есть — ничего не делает. Дальше проекты правятся в базе.
  *
- * Читает: STATUS_API_URL / STATUS_API_TOKEN (агент), GITHUB_REPOS (сервисы),
- * BOOTSTRAP_ORG, BOOTSTRAP_PROJECT_SLUG / _NAME, BOOTSTRAP_SERVER_HOST.
+ * Читает: STATUS_API_TOKEN (токен агента; STATUS_API_URL — только для
+ * переходного прямого режима, без него сервер ждёт агента через relay),
+ * GITHUB_REPOS (сервисы), BOOTSTRAP_ORG, BOOTSTRAP_PROJECT_SLUG / _NAME,
+ * BOOTSTRAP_SERVER_HOST.
  */
 export async function bootstrapFromEnv(): Promise<void> {
   const existing = await db.select({ id: schema.organizations.id }).from(schema.organizations).limit(1);
   if (existing.length > 0) {
+    await ensureAgentTokenHashes();
     await ensureDatabaseFromEnv();
     return;
   }
 
-  const agentUrl = process.env.STATUS_API_URL;
+  const agentUrl = process.env.STATUS_API_URL || null;
   const agentToken = process.env.STATUS_API_TOKEN;
-  if (!agentUrl || !agentToken) {
-    console.warn("[scalefield] control-plane пустой, а STATUS_API_URL/STATUS_API_TOKEN не заданы — бутстрап пропущен");
+  if (!agentToken) {
+    console.warn("[scalefield] control-plane пустой, а STATUS_API_TOKEN не задан — бутстрап пропущен");
     return;
   }
 
@@ -47,6 +51,7 @@ export async function bootstrapFromEnv(): Promise<void> {
         host: serverHost,
         agentUrl,
         agentTokenEnc: encryptSecret(agentToken),
+        agentTokenHash: hashAgentToken(agentToken),
       })
       .returning();
     const [project] = await tx
@@ -72,6 +77,24 @@ export async function bootstrapFromEnv(): Promise<void> {
   });
   console.log(`[scalefield] control-plane инициализирован: org=${orgSlug} project=${projectSlug}`);
   await ensureDatabaseFromEnv();
+}
+
+/**
+ * Серверы, заведённые до появления `agent_token_hash`, получают хеш из
+ * расшифрованного токена — иначе relay не узнает их агента. Идемпотентно.
+ */
+async function ensureAgentTokenHashes(): Promise<void> {
+  const rows = await db
+    .select({ id: schema.servers.id, enc: schema.servers.agentTokenEnc })
+    .from(schema.servers)
+    .where(isNull(schema.servers.agentTokenHash));
+  for (const r of rows) {
+    await db
+      .update(schema.servers)
+      .set({ agentTokenHash: hashAgentToken(decryptSecret(r.enc)) })
+      .where(eq(schema.servers.id, r.id));
+  }
+  if (rows.length > 0) console.log(`[scalefield] хеш токена агента проставлен ${rows.length} серверам`);
 }
 
 /**

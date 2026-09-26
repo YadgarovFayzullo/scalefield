@@ -1,0 +1,41 @@
+# Агент Scalefield на сервере клиента (researcher.uz, qrtifact.uz, дальше —
+# любой VPS). Это всё, что стоит у клиента: сам продукт (панель, control-plane,
+# relay) живёт у нас. Агент держит исходящий WebSocket к relay и исполняет
+# присланные команды (метрики, деплой compose-стеков, сборка из Git);
+# входящих портов у него нет, поэтому сервер может быть за NAT и файрволом.
+#
+# Этот файл — эталон того, что кладёт на сервер установка из панели
+# («Добавить сервер» → SSH, фаза 1.5 дорожной карты). Каталог: /opt/scalefield.
+# Значения SCALEFIELD_* выдаёт панель при регистрации сервера.
+services:
+  agent:
+    image: ghcr.io/yadgarovfayzullo/scalefield-agent:latest
+    restart: unless-stopped
+    environment:
+      SCALEFIELD_RELAY_URL: ${SCALEFIELD_RELAY_URL:-wss://relay.researcher.uz/agent}
+      SCALEFIELD_AGENT_TOKEN: ${SCALEFIELD_AGENT_TOKEN}
+      # Прямой режим выключен: токен внутренних ручек = токен агента.
+      STATUS_API_TOKEN: ${SCALEFIELD_AGENT_TOKEN}
+      # Postgres проекта, если он есть на этом сервере (метрики pg_stat_*).
+      STATUS_DATABASE_URL: ${STATUS_DATABASE_URL:-}
+      DISK_PATH: /host
+      PROC_ROOT: /host/proc
+      CADDY_ACCESS_LOG: /var/log/traefik/access.log
+      APPS_ROOT: /opt/apps
+    volumes:
+      - /proc:/host/proc:ro
+      - /:/host:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/apps:/opt/apps
+      - /var/log/traefik:/var/log/traefik:ro
+    networks: [edge]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  # Сеть Traefik этого сервера: в ней живут задеплоенные сервисы с доменами.
+  edge:
+    external: true

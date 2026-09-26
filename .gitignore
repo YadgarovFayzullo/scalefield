@@ -44,3 +44,7 @@ next-env.d.ts
 # Python (агент)
 agent/**/__pycache__/
 agent/**/*.pyc
+
+# Relay (свой пакет)
+relay/node_modules/
+relay/dist/

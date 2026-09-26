@@ -57,20 +57,31 @@ export const memberships = pgTable(
   (t) => [primaryKey({ columns: [t.orgId, t.userId] })],
 );
 
-// Сервер = хост с Docker и агентом. Агент — researcher-uz-status/api сегодня;
-// `agentUrl` — адрес внутри docker-сети или публичный, `agentTokenEnc` —
-// зашифрованный X-Status-Token.
-export const servers = pgTable("servers", {
-  id: id(),
-  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  host: text("host").notNull(), // IP или hostname для SSH/справки
-  provider: text("provider"), // timeweb | digitalocean | hetzner | ...
-  agentUrl: text("agent_url").notNull(),
-  agentTokenEnc: text("agent_token_enc").notNull(),
-  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
-  createdAt: createdAt(),
-});
+// Сервер = хост с Docker и агентом (agent/). Основной транспорт — обратный
+// туннель: агент сам держит WebSocket к relay (relay/), входящих портов у него
+// нет, поэтому сервер клиента может стоять за NAT и файрволом. Токен агента
+// хранится дважды: `agentTokenEnc` (расшифровываемый — чтобы показать команду
+// установки) и `agentTokenHash` (sha256 — по нему relay через
+// /api/internal/relay/auth узнаёт, чей это агент). `agentUrl` — переходный
+// прямой режим (control-plane в одной docker-сети с агентом); уйдёт.
+export const servers = pgTable(
+  "servers",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    host: text("host").notNull(), // IP или hostname для SSH/справки
+    provider: text("provider"), // timeweb | digitalocean | hetzner | ...
+    agentUrl: text("agent_url"),
+    agentTokenEnc: text("agent_token_enc").notNull(),
+    agentTokenHash: text("agent_token_hash"),
+    agentVersion: text("agent_version"),
+    agentHostname: text("agent_hostname"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("servers_agent_token_hash").on(t.agentTokenHash)],
+);
 
 export const projects = pgTable(
   "projects",

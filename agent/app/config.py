@@ -43,9 +43,21 @@ class Settings(BaseSettings):
     # контейнер монтируется по тому же пути, чтобы docker compose видел файлы).
     APPS_ROOT: str = "/opt/apps"
 
+    # Обратный туннель к relay Scalefield (ws(s)://relay.../agent), см.
+    # app/tunnel.py. Пусто — прямой режим: control-plane сам ходит на порт
+    # агента (только когда они в одной docker-сети).
+    SCALEFIELD_RELAY_URL: str | None = None
+    # Токен этого сервера в control-plane (`servers.agent_token`). По умолчанию
+    # тот же STATUS_API_TOKEN — это один и тот же секрет сервера.
+    SCALEFIELD_AGENT_TOKEN: str | None = None
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
+    @property
+    def agent_token(self) -> str:
+        return self.SCALEFIELD_AGENT_TOKEN or self.STATUS_API_TOKEN
 
     class Config:
         env_file = (".env", ".env.local")

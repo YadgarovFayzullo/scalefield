@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "relay": "npm --prefix relay run dev"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",

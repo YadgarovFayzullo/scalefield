@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { COOKIE_NAME, isValidSession } from "@/lib/session";
 import { getProjectAgent } from "@/lib/projects";
+import { AgentError, agentRequest } from "@/lib/agent";
 import { hasTrackedViews, visitorsFromDb } from "@/lib/visitors-db";
 import { listServices } from "@/lib/services";
 import type { VisitorsData } from "@/lib/status";
@@ -41,14 +42,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   const domains = (await listServices(agent.project.id)).flatMap((s) => s.domains);
   const hostsQs = domains.length > 0 ? `&hosts=${encodeURIComponent(domains.join(","))}` : "";
   try {
-    const upstream = await fetch(`${agent.agentUrl}/status/visitors?days=${days}${hostsQs}`, {
-      headers: { "X-Status-Token": agent.agentToken },
-      cache: "no-store",
-      signal: AbortSignal.timeout(20000),
-    });
-    const body = (await upstream.json()) as VisitorsData;
+    const body = await agentRequest<VisitorsData>(agent, `/status/visitors?days=${days}${hostsQs}`, { timeoutMs: 20000 });
     return NextResponse.json({ ...body, source: "logs" });
   } catch (e) {
-    return NextResponse.json({ error: "Агент недоступен", detail: String(e) }, { status: 502 });
+    const status = e instanceof AgentError ? e.status : 502;
+    return NextResponse.json({ error: "Агент недоступен", detail: e instanceof Error ? e.message : String(e) }, { status });
   }
 }

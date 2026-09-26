@@ -8,12 +8,14 @@ export async function proxy(req: NextRequest) {
 
   // Webhook GitHub приходит без сессии — его защищает подпись секретом.
   // Маячок клиентского трекера тоже без сессии — с чужого сайта её и не будет.
+  // /api/internal/* зовёт relay — по общему секрету (src/lib/relay.ts).
   const isPublic =
     pathname === "/login" ||
     pathname === "/api/login" ||
     pathname === "/api/logout" ||
     pathname === "/api/collect" ||
-    pathname.startsWith("/api/hooks/");
+    pathname.startsWith("/api/hooks/") ||
+    pathname.startsWith("/api/internal/");
   if (isPublic) return NextResponse.next();
 
   const token = req.cookies.get(COOKIE_NAME)?.value;

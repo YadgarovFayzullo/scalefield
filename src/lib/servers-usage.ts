@@ -1,7 +1,6 @@
 import "server-only";
 import { db, schema } from "@/db";
-import { decryptSecret } from "@/lib/secrets";
-import { agentRequest } from "@/lib/agent";
+import { agentRef, agentRequest } from "@/lib/agent";
 import type { ServerData } from "@/lib/status";
 import type { Server } from "@/db/schema";
 
@@ -18,11 +17,7 @@ export async function listServersUsage(): Promise<ServerUsage[]> {
   return Promise.all(
     servers.map(async (s): Promise<ServerUsage> => {
       try {
-        const data = await agentRequest<ServerData>(
-          { agentUrl: s.agentUrl, agentToken: decryptSecret(s.agentTokenEnc) },
-          "/status/server",
-          { timeoutMs: 8000 },
-        );
+        const data = await agentRequest<ServerData>(agentRef(s), "/status/server", { timeoutMs: 8000 });
         return { server: { id: s.id, name: s.name, host: s.host }, data, error: null };
       } catch (e) {
         return { server: { id: s.id, name: s.name, host: s.host }, data: null, error: e instanceof Error ? e.message : String(e) };

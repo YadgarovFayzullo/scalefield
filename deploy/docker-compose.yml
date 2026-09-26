@@ -1,11 +1,18 @@
-# Стек панели владельца на Timeweb: коллектор метрик (researcher-uz-status/api)
-# + Scalefield (Next.js). Живёт в /opt/apps/status рядом с backend/frontend/traefik.
+# Стек control-plane Scalefield: панель + API (`web`), relay (точка, к которой
+# подключаются агенты серверов) и — пока control-plane стоит на том же
+# сервере, что и researcher.uz, — его агент (`status-api`). Живёт в
+# /opt/apps/status рядом с backend/frontend/traefik.
 #
-# Сети: `edge` — внешняя сеть Traefik (наружу смотрит только web);
-# `backend_internal` — сеть бэкенда, в ней контейнер `db` Postgres (коллектор
-# читает pg_stat_* и контент). Образы собираются на маке под linux/amd64 и
-# заливаются `docker save | ssh docker load` (у сервера 2 ГБ RAM — сборка Next
-# на нём не влезает), см. ../deploy/README.md.
+# Целевая картина: `web` и `relay` — на своём сервере Scalefield, агент — на
+# каждом сервере клиента (deploy/agent/docker-compose.yml) и подключается к
+# relay по wss://. Здесь агент ходит к relay по внутренней сети — это тот же
+# обратный туннель, просто без TLS.
+#
+# Сети: `edge` — внешняя сеть Traefik (наружу смотрят web и relay);
+# `backend_internal` — сеть бэкенда, в ней контейнер `db` Postgres (агент читает
+# pg_stat_* и контент, control-plane держит там базу `scalefield`). Образы
+# собираются на маке под linux/amd64 и заливаются `docker save | ssh docker
+# load` (у сервера 2 ГБ RAM — сборка Next на нём не влезает), см. README.md.
 services:
   status-api:
     image: status-api:latest
@@ -16,6 +23,8 @@ services:
       PROC_ROOT: /host/proc
       CADDY_ACCESS_LOG: /var/log/traefik/access.log
       APPS_ROOT: /opt/apps
+      # Обратный туннель: агент сам подключается к relay, входящих портов нет.
+      SCALEFIELD_RELAY_URL: ws://relay:3003/agent
     volumes:
       - /proc:/host/proc:ro
       - /:/host:ro
@@ -24,27 +33,44 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/apps:/opt/apps
       - /var/log/traefik:/var/log/traefik:ro
-    networks: [backend_internal]
+    networks: [backend_internal, relay_internal]
+    depends_on: [relay]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
 
+  relay:
+    image: scalefield-relay:latest
+    restart: unless-stopped
+    environment:
+      CONTROL_URL: http://web:3000
+      RELAY_SECRET: ${RELAY_SECRET}
+    networks: [relay_internal, edge]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=edge
+      - traefik.http.routers.relay.rule=Host(`${RELAY_HOST:-relay.researcher.uz}`)
+      - traefik.http.routers.relay.entrypoints=websecure
+      - traefik.http.routers.relay.tls.certresolver=le
+      - traefik.http.services.relay.loadbalancer.server.port=3003
+
   web:
     image: scalefield:latest
     restart: unless-stopped
     env_file: .env
     environment:
-      STATUS_API_URL: http://status-api:8000
       # Control-plane: база `scalefield` на том же Postgres, что и бэкенд
       # (контейнер `db` в backend_internal). Создаётся один раз:
       #   docker exec backend-db-1 psql -U postgres -c 'create database scalefield'
       # Миграции применяет сам образ на старте.
       DATABASE_URL: ${DATABASE_URL}
+      RELAY_URL: http://relay:3003
+      RELAY_SECRET: ${RELAY_SECRET}
       BOOTSTRAP_SERVER_HOST: ${BOOTSTRAP_SERVER_HOST:-81.31.246.252}
-    depends_on: [status-api]
-    networks: [backend_internal, edge]
+    depends_on: [relay]
+    networks: [backend_internal, relay_internal, edge]
     labels:
       - traefik.enable=true
       - traefik.docker.network=edge
@@ -58,3 +84,5 @@ networks:
     external: true
   backend_internal:
     external: true
+  # Внутренняя сеть control-plane ↔ relay ↔ локальный агент.
+  relay_internal: {}

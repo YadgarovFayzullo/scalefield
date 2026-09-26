@@ -31,6 +31,7 @@ from app.deploy import (
 from app.jobs import get_job, start_job
 from app.db import close_pool, get_pool
 from app.security import require_token
+from app.tunnel import start_tunnel, stop_tunnel
 
 app = FastAPI(title="researcher.uz status", version="1.1.0")
 
@@ -45,8 +46,16 @@ app.add_middleware(
 _STARTED_AT = time.time()
 
 
+@app.on_event("startup")
+async def _startup() -> None:
+    # Обратный туннель к relay (если задан SCALEFIELD_RELAY_URL) — агент сам
+    # подключается к control-plane, входящих портов у него нет.
+    start_tunnel(app)
+
+
 @app.on_event("shutdown")
 async def _shutdown() -> None:
+    await stop_tunnel()
     await close_pool()
 
 

@@ -71,9 +71,8 @@ export default async function ProjectsPage() {
           </div>
         ) : projects.length === 0 ? (
           <div className="rounded-lg border border-border p-6 text-sm text-muted-foreground">
-            No projects yet. Set <span className="font-mono">STATUS_API_URL</span>,{" "}
-            <span className="font-mono">STATUS_API_TOKEN</span> and <span className="font-mono">GITHUB_REPOS</span>,
-            then restart — the first project is created from them.
+            No projects yet. Set <span className="font-mono">STATUS_API_TOKEN</span> and{" "}
+            <span className="font-mono">GITHUB_REPOS</span>, then restart — the first project is created from them.
           </div>
         ) : (
           <div className="grid gap-6 lg:grid-cols-[280px_1fr]">

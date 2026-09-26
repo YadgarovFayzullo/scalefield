@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { decryptSecret } from "@/lib/secrets";
+import { agentRef, type AgentRef } from "@/lib/agent";
 import type { Domain, Project, Server, Service } from "@/db/schema";
 
 /**
@@ -37,19 +37,13 @@ export async function getProject(slug: string): Promise<ProjectSummary | null> {
   return (row as ProjectSummary | undefined) ?? null;
 }
 
-/** Адрес и токен агента проекта — только для серверных прокси, в браузер не отдавать. */
-export async function getProjectAgent(
-  slug: string,
-): Promise<{ project: Project; agentUrl: string; agentToken: string } | null> {
+/** Проект и ссылка на его агента (`AgentRef`) — только для серверного кода, в браузер не отдавать. */
+export async function getProjectAgent(slug: string): Promise<({ project: Project } & AgentRef) | null> {
   const project = await db.query.projects.findFirst({ where: eq(schema.projects.slug, slug) });
   if (!project || !project.serverId) return null;
   const server = await db.query.servers.findFirst({ where: eq(schema.servers.id, project.serverId) });
   if (!server) return null;
-  return {
-    project,
-    agentUrl: server.agentUrl.replace(/\/+$/, ""),
-    agentToken: decryptSecret(server.agentTokenEnc),
-  };
+  return { project, ...agentRef(server) };
 }
 
 /** Репозитории проекта, из которых собираются деплои (через сервисы). */

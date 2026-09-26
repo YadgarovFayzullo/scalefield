@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { COOKIE_NAME, isValidSession } from "@/lib/session";
 import { getProjectAgent } from "@/lib/projects";
+import { AgentError, agentRaw } from "@/lib/agent";
 import { listServices } from "@/lib/services";
 import { projectContainerFilter } from "@/lib/container-scope";
 
@@ -89,13 +90,9 @@ export async function GET(
   }
   const qs = qsParams.toString() ? `?${qsParams.toString()}` : "";
   try {
-    const upstream = await fetch(`${agent.agentUrl}/status/${key}${qs}`, {
-      headers: { "X-Status-Token": agent.agentToken },
-      cache: "no-store",
-      signal: AbortSignal.timeout(20000),
-    });
-    let body = await upstream.text();
-    if (upstream.ok && belongs && key in CONTAINER_LIST_PATHS) {
+    const upstream = await agentRaw(agent, `/status/${key}${qs}`, { timeoutMs: 20000 });
+    let body = upstream.text;
+    if (upstream.status === 200 && belongs && key in CONTAINER_LIST_PATHS) {
       try {
         const json = filterContainers(JSON.parse(body), CONTAINER_LIST_PATHS[key], belongs);
         body = JSON.stringify(json);
@@ -109,6 +106,7 @@ export async function GET(
       headers: { "content-type": "application/json" },
     });
   } catch (e) {
-    return NextResponse.json({ error: "Агент недоступен", detail: String(e) }, { status: 502 });
+    const status = e instanceof AgentError ? e.status : 502;
+    return NextResponse.json({ error: "Агент недоступен", detail: e instanceof Error ? e.message : String(e) }, { status });
   }
 }
