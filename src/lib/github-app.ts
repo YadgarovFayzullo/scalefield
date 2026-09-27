@@ -51,7 +51,11 @@ export function manifestFor(name: string) {
       metadata: "read",
       contents: "read", // клонировать репозиторий для сборки
       actions: "read", // прогоны GitHub Actions → Deployments
-      email_addresses: "read", // подтверждённый email при входе через GitHub
+      // email_addresses сюда НЕЛЬЗЯ: это право аккаунта, манифест принимает
+      // только права на репозитории/организации — GitHub отвечает «Default
+      // permission records resource is not included in the list». Его можно
+      // включить руками в настройках приложения (Account permissions →
+      // Email addresses: Read), тогда вход сверяет и приватный email.
     },
     default_events: ["push", "workflow_run"],
   };
@@ -175,12 +179,16 @@ export async function fetchGithubUser(userToken: string): Promise<GithubUser> {
   const h = { ...HEADERS, Authorization: `Bearer ${userToken}` };
   const u = await fetch(`${API}/user`, { headers: h, cache: "no-store" });
   if (!u.ok) throw new Error(`GitHub /user: ${u.status}`);
-  const user = (await u.json()) as { id: number; login: string; name?: string | null; avatar_url?: string | null };
-  let email: string | null = null;
+  const user = (await u.json()) as { id: number; login: string; name?: string | null; avatar_url?: string | null; email?: string | null };
+  // Приватные адреса — только с правом Email addresses (включается в
+  // настройках приложения); без него /user/emails отвечает 403, и берём
+  // публичный email профиля: GitHub позволяет сделать публичным только
+  // подтверждённый адрес.
+  let email: string | null = user.email ? user.email.toLowerCase() : null;
   const e = await fetch(`${API}/user/emails`, { headers: h, cache: "no-store" });
   if (e.ok) {
     const list = (await e.json()) as { email: string; primary: boolean; verified: boolean }[];
-    email = list.find((x) => x.primary && x.verified)?.email?.toLowerCase() ?? null;
+    email = list.find((x) => x.primary && x.verified)?.email?.toLowerCase() ?? email;
   }
   return { id: String(user.id), login: user.login, name: user.name ?? null, avatarUrl: user.avatar_url ?? null, email };
 }

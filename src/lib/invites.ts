@@ -142,10 +142,17 @@ export async function acceptInviteWithGithub(
   token: string,
   gh: { id: string; login: string; name: string | null; avatarUrl: string | null; email: string | null },
 ): Promise<string> {
-  if (!gh.email) throw new InviteError("Your GitHub account has no verified primary email — add one on GitHub or sign up with email");
   const linked = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.githubId, gh.id)).limit(1);
   if (linked.length) throw new InviteError("This GitHub account is already linked to a Scalefield user — sign in instead", 409);
-  return registerFromInvite({ token, name: gh.name || gh.login, email: gh.email, passwordHash: null, github: gh });
+  // Без публичного email на GitHub берём адрес из приглашения: ссылка и так
+  // даёт право зарегистрироваться на него (как при регистрации с паролем).
+  let email = gh.email;
+  if (!email) {
+    const inv = await findUsable(token);
+    email = inv?.email ?? null;
+  }
+  if (!email) throw new InviteError("Your GitHub profile has no public email — sign up with email and password, then link GitHub in Settings");
+  return registerFromInvite({ token, name: gh.name || gh.login, email, passwordHash: null, github: gh });
 }
 
 async function registerFromInvite(input: {
