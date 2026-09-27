@@ -18,8 +18,6 @@ function SignupForm() {
   const token = params.get("invite") || "";
   const [info, setInfo] = React.useState<InviteInfo | null>(null);
   const [invalid, setInvalid] = React.useState<string | null>(null);
-  // Без приглашения — регистрация через GitHub, если она открыта (SIGNUP_OPEN).
-  const [openSignup, setOpenSignup] = React.useState(false);
   const [name, setName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -31,7 +29,8 @@ function SignupForm() {
       fetch("/api/auth/providers")
         .then((r) => r.json())
         .then((j: { signupOpen?: boolean }) => {
-          if (j.signupOpen) setOpenSignup(true);
+          // Открытая регистрация (SIGNUP_OPEN): та же форма, без приглашения.
+          if (j.signupOpen) setInfo({ email: null, orgName: null });
           else setInvalid("Registration is invite-only. Ask the Scalefield owner for an invite link.");
         })
         .catch(() => setInvalid("Registration is invite-only. Ask the Scalefield owner for an invite link."));
@@ -64,7 +63,7 @@ function SignupForm() {
         setError(json?.error || `HTTP ${res.status}`);
         return;
       }
-      window.location.href = "/dashboard";
+      window.location.href = "/new";
     } catch (err) {
       setError(String(err));
     } finally {
@@ -72,20 +71,6 @@ function SignupForm() {
     }
   }
 
-  if (openSignup) {
-    return (
-      <div className="space-y-4">
-        <GithubButton query="mode=login" label="Sign up with GitHub" />
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <p className="text-center text-xs text-muted-foreground">
-          Your repositories show up right after — pick one and deploy it to your server.{" "}
-          <Link href="/login" className="underline underline-offset-4">
-            Already have an account?
-          </Link>
-        </p>
-      </div>
-    );
-  }
   if (invalid) {
     return (
       <div className="space-y-4 text-center">
@@ -100,7 +85,7 @@ function SignupForm() {
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <GithubButton query={`mode=signup&invite=${encodeURIComponent(token)}`} label="Sign up with GitHub" />
+      <GithubButton query={token ? `mode=signup&invite=${encodeURIComponent(token)}` : "mode=login"} label="Sign up with GitHub" />
       {info.orgName && (
         <p className="rounded-md bg-muted px-3 py-2 text-sm">
           You&apos;re joining <span className="font-medium">{info.orgName}</span>.

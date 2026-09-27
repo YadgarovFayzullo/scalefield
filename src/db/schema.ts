@@ -50,6 +50,12 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   name: text("name"),
   passwordHash: text("password_hash"),
+  // Подтверждён ли email: владелец платформы, приглашение на этот адрес,
+  // публичный (= подтверждённый) адрес GitHub. При открытой регистрации
+  // адрес вводится руками и НЕ подтверждён — к такому аккаунту вход через
+  // GitHub по совпадению email не привязывается (иначе чужой email, занятый
+  // с паролем, перехватил бы вход настоящего владельца адреса).
+  emailVerified: boolean("email_verified").notNull().default(false),
   githubId: text("github_id").unique(),
   githubLogin: text("github_login"),
   avatarUrl: text("avatar_url"),

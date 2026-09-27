@@ -38,7 +38,7 @@ async function ensureOwnerUser(): Promise<void> {
   const orgs = await db.select({ id: schema.organizations.id }).from(schema.organizations);
   const passwordHash = await hashPassword(password);
   await db.transaction(async (tx) => {
-    const [user] = await tx.insert(schema.users).values({ email, name: "Owner", passwordHash, isPlatformAdmin: true }).returning();
+    const [user] = await tx.insert(schema.users).values({ email, name: "Owner", passwordHash, isPlatformAdmin: true, emailVerified: true }).returning();
     if (orgs.length) await tx.insert(schema.memberships).values(orgs.map((o) => ({ orgId: o.id, userId: user.id, role: "owner" })));
   });
   console.log(`[scalefield] владелец платформы ${email} создан (пароль — DASHBOARD_PASSWORD), организаций: ${orgs.length}`);

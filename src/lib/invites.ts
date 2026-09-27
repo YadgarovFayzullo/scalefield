@@ -152,7 +152,7 @@ export async function acceptInviteWithGithub(
     email = inv?.email ?? null;
   }
   if (!email) throw new InviteError("Your GitHub profile has no public email — sign up with email and password, then link GitHub in Settings");
-  return registerFromInvite({ token, name: gh.name || gh.login, email, passwordHash: null, github: gh });
+  return registerFromInvite({ token, name: gh.name || gh.login, email, passwordHash: null, github: gh, emailVerified: Boolean(gh.email) });
 }
 
 async function registerFromInvite(input: {
@@ -161,6 +161,7 @@ async function registerFromInvite(input: {
   email: string;
   passwordHash: string | null;
   github: { id: string; login: string; avatarUrl: string | null } | null;
+  emailVerified?: boolean;
 }): Promise<string> {
   const name = input.name.trim().slice(0, 100);
   const email = input.email.trim().toLowerCase();
@@ -189,6 +190,8 @@ async function registerFromInvite(input: {
         email,
         name,
         passwordHash: input.passwordHash,
+        // Приглашение на конкретный адрес — владелец за него поручился.
+        emailVerified: Boolean(input.emailVerified) || Boolean(inv.email),
         githubId: input.github?.id ?? null,
         githubLogin: input.github?.login ?? null,
         avatarUrl: input.github?.avatarUrl ?? null,
@@ -225,8 +228,29 @@ export async function registerWithGithub(gh: { id: string; login: string; name: 
   return db.transaction(async (tx) => {
     const [user] = await tx
       .insert(schema.users)
-      .values({ email, name, githubId: gh.id, githubLogin: gh.login, avatarUrl: gh.avatarUrl })
+      .values({ email, name, emailVerified: email === gh.email, githubId: gh.id, githubLogin: gh.login, avatarUrl: gh.avatarUrl })
       .returning();
+    const [org] = await tx.insert(schema.organizations).values({ slug: orgSlug, name: `${name}'s team` }).returning();
+    await tx.insert(schema.memberships).values({ orgId: org.id, userId: user.id, role: "owner" });
+    return user.id;
+  });
+}
+
+/** Открытая регистрация по email и паролю (SIGNUP_OPEN=true): своя команда, email не подтверждён. */
+export async function registerWithPassword(input: { name: string; email: string; password: string }): Promise<string> {
+  if (!signupOpen()) throw new InviteError("Registration is invite-only. Ask the Scalefield owner for an invite link.", 403);
+  const name = input.name.trim().slice(0, 100);
+  const email = input.email.trim().toLowerCase();
+  if (!name) throw new InviteError("Name is required");
+  if (!EMAIL_RE.test(email)) throw new InviteError("Email is invalid");
+  const problem = passwordProblem(input.password);
+  if (problem) throw new InviteError(problem);
+  const taken = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, email)).limit(1);
+  if (taken.length) throw new InviteError("A user with this email already exists — sign in instead", 409);
+  const passwordHash = await hashPassword(input.password);
+  const orgSlug = await freeOrgSlug(slugify(name));
+  return db.transaction(async (tx) => {
+    const [user] = await tx.insert(schema.users).values({ email, name, passwordHash, emailVerified: false }).returning();
     const [org] = await tx.insert(schema.organizations).values({ slug: orgSlug, name: `${name}'s team` }).returning();
     await tx.insert(schema.memberships).values({ orgId: org.id, userId: user.id, role: "owner" });
     return user.id;

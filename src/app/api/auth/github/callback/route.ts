@@ -121,7 +121,7 @@ export async function GET(req: NextRequest) {
       const byEmail = await db
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(and(sql`lower(${schema.users.email}) = ${gh.email}`, sql`${schema.users.githubId} is null`))
+        .where(and(sql`lower(${schema.users.email}) = ${gh.email}`, sql`${schema.users.githubId} is null`, eq(schema.users.emailVerified, true)))
         .limit(1);
       if (byEmail[0]) {
         await db.update(schema.users).set({ githubId: gh.id }).where(eq(schema.users.id, byEmail[0].id));
