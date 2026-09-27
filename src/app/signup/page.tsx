@@ -136,7 +136,7 @@ export default function SignupPage() {
             <Image src="/scalefield.svg" alt="Scalefield" width={48} height={48} />
           </div>
           <CardTitle>Create your Scalefield account</CardTitle>
-          <CardDescription>You were invited to Scalefield</CardDescription>
+          <CardDescription>Deploy from GitHub to your own servers</CardDescription>
         </CardHeader>
         <CardContent>
           <React.Suspense>
