@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { createSession, primaryOrgId, requestUser, setSessionCookie, type SessionUser } from "@/lib/auth";
-import { appUrl, exchangeUserCode, fetchGithubUser, getGithubApp, userInstallations, type GithubUser } from "@/lib/github-app";
-import { acceptInviteWithGithub, InviteError } from "@/lib/invites";
+import { appUrl, exchangeUserCode, fetchGithubUser, getGithubApp, linkUserInstallations, type GithubUser } from "@/lib/github-app";
+import { acceptInviteWithGithub, InviteError, registerWithGithub, signupOpen } from "@/lib/invites";
 import { clearNonceCookie, readState } from "@/lib/oauth-state";
 
 export const runtime = "nodejs";
@@ -39,19 +39,27 @@ async function signIn(req: NextRequest, userId: string, gh: GithubUser, to: stri
 async function linkInstallations(user: SessionUser, orgId: string, userToken: string, onlyId: string | null): Promise<number> {
   const member = user.memberships.find((m) => m.orgId === orgId);
   if (!member || (member.role !== "owner" && member.role !== "admin")) throw new Error("Only team owners and admins can connect GitHub");
-  const available = await userInstallations(userToken);
-  const chosen = onlyId ? available.filter((i) => i.id === onlyId) : available;
-  if (onlyId && chosen.length === 0) throw new Error("GitHub does not confirm you have access to this installation");
-  for (const i of chosen) {
-    await db
-      .insert(schema.githubInstallations)
-      .values({ installationId: i.id, orgId, accountLogin: i.login, accountType: i.type, accountAvatarUrl: i.avatarUrl, addedBy: user.id })
-      .onConflictDoUpdate({
-        target: [schema.githubInstallations.orgId, schema.githubInstallations.installationId],
-        set: { accountLogin: i.login, accountType: i.type, accountAvatarUrl: i.avatarUrl },
-      });
+  return linkUserInstallations(orgId, user.id, userToken, onlyId);
+}
+
+/**
+ * После входа/регистрации через GitHub: установки приложения, уже доступные
+ * этому пользователю, сразу подключаются к его СОБСТВЕННОЙ команде (где он
+ * owner) — как у Vercel, репозитории видны без лишнего шага. В чужую
+ * команду, где он лишь участник, ничего не подключаем.
+ */
+async function autoLink(userId: string, userToken: string): Promise<void> {
+  const own = await db
+    .select({ orgId: schema.memberships.orgId })
+    .from(schema.memberships)
+    .where(and(eq(schema.memberships.userId, userId), eq(schema.memberships.role, "owner")))
+    .limit(1);
+  if (!own[0]) return;
+  try {
+    await linkUserInstallations(own[0].orgId, userId, userToken);
+  } catch {
+    /* установок нет или GitHub не ответил — подключат вручную на /new */
   }
-  return chosen.length;
 }
 
 export async function GET(req: NextRequest) {
@@ -82,7 +90,7 @@ export async function GET(req: NextRequest) {
     if (state.mode === "install") {
       if (!current) return back("/login", { error: "Sign in to Scalefield first, then connect GitHub" });
       const n = await linkInstallations(current, state.orgId, userToken, installationId);
-      return back("/settings/github", { connected: String(n) });
+      return back(state.next === "/new" ? "/new" : "/settings/github", { connected: String(n) });
     }
 
     if (state.mode === "link") {
@@ -95,7 +103,8 @@ export async function GET(req: NextRequest) {
 
     if (state.mode === "signup") {
       const userId = await acceptInviteWithGithub(state.invite, gh);
-      return signIn(req, userId, gh, "/dashboard");
+      await autoLink(userId, userToken);
+      return signIn(req, userId, gh, "/new");
     }
 
     // Манифест приходит на свой callback (/api/github/manifest/callback), не сюда.
@@ -104,7 +113,10 @@ export async function GET(req: NextRequest) {
     // Вход: по привязанному GitHub; иначе по совпадающему ПОДТВЕРЖДЁННОМУ
     // email (так владелец, заведённый с паролем, входит через GitHub сразу).
     const byGithub = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.githubId, gh.id)).limit(1);
-    if (byGithub[0]) return signIn(req, byGithub[0].id, gh, safeNext(state.next));
+    if (byGithub[0]) {
+      await autoLink(byGithub[0].id, userToken);
+      return signIn(req, byGithub[0].id, gh, safeNext(state.next));
+    }
     if (gh.email) {
       const byEmail = await db
         .select({ id: schema.users.id })
@@ -113,8 +125,16 @@ export async function GET(req: NextRequest) {
         .limit(1);
       if (byEmail[0]) {
         await db.update(schema.users).set({ githubId: gh.id }).where(eq(schema.users.id, byEmail[0].id));
+        await autoLink(byEmail[0].id, userToken);
         return signIn(req, byEmail[0].id, gh, safeNext(state.next));
       }
+    }
+    // Открытая регистрация (SIGNUP_OPEN=true): аккаунта нет — создаём его со
+    // своей командой прямо из GitHub и ведём импортировать репозиторий.
+    if (signupOpen()) {
+      const userId = await registerWithGithub(gh);
+      await autoLink(userId, userToken);
+      return signIn(req, userId, gh, "/new");
     }
     return back("/login", { error: `No Scalefield account for GitHub @${gh.login}. Scalefield is invite-only — open your invite link to sign up.` });
   } catch (e) {

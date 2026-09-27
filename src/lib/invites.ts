@@ -204,3 +204,31 @@ async function registerFromInvite(input: {
     return user.id;
   });
 }
+
+/** Открыта ли регистрация без приглашения (только через GitHub). */
+export function signupOpen(): boolean {
+  return process.env.SIGNUP_OPEN === "true";
+}
+
+/**
+ * Регистрация без приглашения — через GitHub при SIGNUP_OPEN=true: своя
+ * команда, email — публичный адрес GitHub или его noreply-адрес (поменять
+ * можно позже). Пароля нет, вход — через GitHub.
+ */
+export async function registerWithGithub(gh: { id: string; login: string; name: string | null; avatarUrl: string | null; email: string | null }): Promise<string> {
+  if (!signupOpen()) throw new InviteError("Registration is invite-only", 403);
+  let email = gh.email || `${gh.id}+${gh.login}@users.noreply.github.com`;
+  const taken = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, email)).limit(1);
+  if (taken.length) email = `${gh.id}+${gh.login}@users.noreply.github.com`;
+  const name = (gh.name || gh.login).trim().slice(0, 100);
+  const orgSlug = await freeOrgSlug(slugify(gh.login));
+  return db.transaction(async (tx) => {
+    const [user] = await tx
+      .insert(schema.users)
+      .values({ email, name, githubId: gh.id, githubLogin: gh.login, avatarUrl: gh.avatarUrl })
+      .returning();
+    const [org] = await tx.insert(schema.organizations).values({ slug: orgSlug, name: `${name}'s team` }).returning();
+    await tx.insert(schema.memberships).values({ orgId: org.id, userId: user.id, role: "owner" });
+    return user.id;
+  });
+}

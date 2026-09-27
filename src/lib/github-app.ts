@@ -211,3 +211,86 @@ export async function verifyWebhook(raw: string, signature: string | null): Prom
   const expected = "sha256=" + createHmac("sha256", decryptSecret(app.webhookSecretEnc)).update(raw).digest("hex");
   return signature.length === expected.length && timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
 }
+
+// ---------- установки и репозитории команды ----------
+
+/** Привязать к команде установки, доступные пользователю GitHub (проверка — его токеном). */
+export async function linkUserInstallations(orgId: string, userId: string, userToken: string, onlyId: string | null = null): Promise<number> {
+  const available = await userInstallations(userToken);
+  const chosen = onlyId ? available.filter((i) => i.id === onlyId) : available;
+  if (onlyId && chosen.length === 0) throw new Error("GitHub does not confirm you have access to this installation");
+  for (const i of chosen) {
+    await db
+      .insert(schema.githubInstallations)
+      .values({ installationId: i.id, orgId, accountLogin: i.login, accountType: i.type, accountAvatarUrl: i.avatarUrl, addedBy: userId })
+      .onConflictDoUpdate({
+        target: [schema.githubInstallations.orgId, schema.githubInstallations.installationId],
+        set: { accountLogin: i.login, accountType: i.type, accountAvatarUrl: i.avatarUrl },
+      });
+  }
+  return chosen.length;
+}
+
+export type RepoView = {
+  fullName: string;
+  name: string;
+  owner: string;
+  private: boolean;
+  defaultBranch: string;
+  updatedAt: string | null;
+  language: string | null;
+  description: string | null;
+};
+
+/**
+ * Репозитории, которые команда может импортировать: всё, что открыто её
+ * установкам GitHub App (GET /installation/repositories токеном установки),
+ * свежие сверху. Установку, удалённую на стороне GitHub, пропускаем.
+ */
+export async function listRepositories(orgId: string): Promise<{ installed: boolean; repos: RepoView[]; errors: string[] }> {
+  const installs = await listInstallations([orgId]);
+  const repos = new Map<string, RepoView>();
+  const errors: string[] = [];
+  for (const inst of installs) {
+    try {
+      const token = await installationToken(inst.installationId);
+      for (let page = 1; page <= 5; page++) {
+        const res = await fetch(`${API}/installation/repositories?per_page=100&page=${page}`, {
+          headers: { ...HEADERS, Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`GitHub ${res.status}`);
+        const j = (await res.json()) as {
+          repositories: {
+            full_name: string;
+            name: string;
+            owner: { login: string };
+            private: boolean;
+            default_branch: string;
+            pushed_at?: string | null;
+            updated_at?: string | null;
+            language?: string | null;
+            description?: string | null;
+          }[];
+        };
+        for (const r of j.repositories) {
+          repos.set(r.full_name.toLowerCase(), {
+            fullName: r.full_name,
+            name: r.name,
+            owner: r.owner.login,
+            private: r.private,
+            defaultBranch: r.default_branch || "main",
+            updatedAt: r.pushed_at ?? r.updated_at ?? null,
+            language: r.language ?? null,
+            description: r.description ?? null,
+          });
+        }
+        if (j.repositories.length < 100) break;
+      }
+    } catch (e) {
+      errors.push(`@${inst.accountLogin}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const list = [...repos.values()].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+  return { installed: installs.length > 0, repos: list, errors };
+}

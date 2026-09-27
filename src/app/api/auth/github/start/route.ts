@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   let state: OAuthState;
   if (mode === "signup") state = { mode: "signup", invite: sp.get("invite") || "" };
   else if (mode === "link") state = { mode: "link", next };
-  else if (mode === "install") state = { mode: "install", orgId: sp.get("org") || "" };
+  else if (mode === "install") state = { mode: "install", orgId: sp.get("org") || "", next };
   else state = { mode: "login", next };
 
   const { state: s, nonce } = createState(state);

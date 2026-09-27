@@ -15,7 +15,7 @@ export type OAuthState =
   | { mode: "login"; next?: string }
   | { mode: "signup"; invite: string }
   | { mode: "link"; next?: string }
-  | { mode: "install"; orgId: string }
+  | { mode: "install"; orgId: string; next?: string }
   | { mode: "manifest" };
 
 function key(): string {

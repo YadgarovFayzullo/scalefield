@@ -65,3 +65,42 @@ export async function projectRepos(projectId: string): Promise<{ repo: string; s
   }
   return out;
 }
+
+export class ProjectError extends Error {
+  constructor(message: string, public status = 400) {
+    super(message);
+  }
+}
+
+function slugify(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "project"
+  );
+}
+
+/** Свободный слаг — глобально (адрес проекта `/p/<slug>` без команды). */
+async function freeProjectSlug(base: string): Promise<string> {
+  for (let i = 0; i < 100; i++) {
+    const slug = i === 0 ? base : `${base}-${i + 1}`;
+    const taken = await db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.slug, slug)).limit(1);
+    if (!taken.length) return slug;
+  }
+  throw new ProjectError("Could not pick a free project name", 409);
+}
+
+/** Новый проект команды; сервер — только из этой же команды. */
+export async function createProject(orgId: string, input: { name: string; serverId: string | null }): Promise<Project> {
+  const name = input.name.trim().slice(0, 80);
+  if (!name) throw new ProjectError("Project name is required");
+  if (input.serverId) {
+    const server = await db.query.servers.findFirst({ where: and(eq(schema.servers.id, input.serverId), eq(schema.servers.orgId, orgId)) });
+    if (!server) throw new ProjectError("Unknown server", 404);
+  }
+  const slug = await freeProjectSlug(slugify(name));
+  const [row] = await db.insert(schema.projects).values({ orgId, slug, name, serverId: input.serverId, settings: {} }).returning();
+  return row;
+}

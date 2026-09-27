@@ -59,7 +59,13 @@ function LoginForm() {
       <Button type="submit" className="w-full" disabled={busy}>
         {busy ? "Signing in…" : "Sign in"}
       </Button>
-      <p className="text-center text-xs text-muted-foreground">Scalefield is invite-only for now. Got an invite link? Open it to create your account.</p>
+      <p className="text-center text-xs text-muted-foreground">
+        New to Scalefield?{" "}
+        <a href="/signup" className="underline underline-offset-4">
+          Sign up
+        </a>{" "}
+        — with GitHub, or with your invite link.
+      </p>
     </form>
   );
 }

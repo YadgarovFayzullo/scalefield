@@ -18,6 +18,8 @@ function SignupForm() {
   const token = params.get("invite") || "";
   const [info, setInfo] = React.useState<InviteInfo | null>(null);
   const [invalid, setInvalid] = React.useState<string | null>(null);
+  // Без приглашения — регистрация через GitHub, если она открыта (SIGNUP_OPEN).
+  const [openSignup, setOpenSignup] = React.useState(false);
   const [name, setName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -26,7 +28,13 @@ function SignupForm() {
 
   React.useEffect(() => {
     if (!token) {
-      setInvalid("Registration is invite-only. Ask the Scalefield owner for an invite link.");
+      fetch("/api/auth/providers")
+        .then((r) => r.json())
+        .then((j: { signupOpen?: boolean }) => {
+          if (j.signupOpen) setOpenSignup(true);
+          else setInvalid("Registration is invite-only. Ask the Scalefield owner for an invite link.");
+        })
+        .catch(() => setInvalid("Registration is invite-only. Ask the Scalefield owner for an invite link."));
       return;
     }
     fetch(`/api/invites/lookup?token=${encodeURIComponent(token)}`)
@@ -64,6 +72,20 @@ function SignupForm() {
     }
   }
 
+  if (openSignup) {
+    return (
+      <div className="space-y-4">
+        <GithubButton query="mode=login" label="Sign up with GitHub" />
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <p className="text-center text-xs text-muted-foreground">
+          Your repositories show up right after — pick one and deploy it to your server.{" "}
+          <Link href="/login" className="underline underline-offset-4">
+            Already have an account?
+          </Link>
+        </p>
+      </div>
+    );
+  }
   if (invalid) {
     return (
       <div className="space-y-4 text-center">

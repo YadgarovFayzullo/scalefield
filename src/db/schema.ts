@@ -186,7 +186,10 @@ export const projects = pgTable(
     settings: jsonb("settings").$type<ProjectSettings>().notNull().default({}),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("projects_org_slug").on(t.orgId, t.slug)],
+  // Слаг уникален глобально, а не внутри команды: адрес проекта — `/p/<slug>`
+  // без команды, и все ручки ищут проект по одному слагу. С уникальностью в
+  // команде два `app` у разных команд путались бы — ручка взяла бы чужой.
+  (t) => [uniqueIndex("projects_slug").on(t.slug)],
 );
 
 export type ProjectSettings = {

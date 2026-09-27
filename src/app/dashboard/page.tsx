@@ -60,6 +60,9 @@ export default async function ProjectsPage() {
             <h1 className="text-2xl font-semibold">Projects</h1>
             <p className="text-sm text-muted-foreground">Everything Scalefield runs and watches for you.</p>
           </div>
+          <Link href="/new" className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">
+            New project
+          </Link>
         </div>
         {error ? (
           <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
@@ -67,7 +70,7 @@ export default async function ProjectsPage() {
           </div>
         ) : projects.length === 0 ? (
           <div className="rounded-lg border border-border p-6 text-sm text-muted-foreground">
-            No projects yet. Start by adding a server on the <Link href="/servers" className="underline underline-offset-4">Servers</Link> page.
+            No projects yet. <Link href="/new" className="underline underline-offset-4">Import a Git repository</Link> — or first add a server on the <Link href="/servers" className="underline underline-offset-4">Servers</Link> page.
           </div>
         ) : (
           <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
