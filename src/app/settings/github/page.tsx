@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { PanelHeader } from "@/components/panel-header";
 import { CreateGithubApp, DisconnectInstallation } from "@/components/dashboard/github-settings";
 import { currentUser, primaryOrgId } from "@/lib/auth";
-import { appUrl, getGithubApp, listInstallations } from "@/lib/github-app";
+import { appUrl, getGithubApp, listInstallations, syncAppInfo } from "@/lib/github-app";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +28,9 @@ export default async function GithubSettingsPage({ searchParams }: { searchParam
   const user = await currentUser();
   if (!user) redirect("/login");
   const sp = await searchParams;
-  const [app, installs] = await Promise.all([getGithubApp(), listInstallations(user.orgIds)]);
+  const [stored, installs] = await Promise.all([getGithubApp(), listInstallations(user.orgIds)]);
+  // Переименование на GitHub меняет slug — подтягиваем актуальный.
+  const app = stored ? await syncAppInfo(stored) : null;
   const orgId = primaryOrgId(user);
   const role = user.memberships.find((m) => m.orgId === orgId)?.role;
   const canManage = role === "owner" || role === "admin";

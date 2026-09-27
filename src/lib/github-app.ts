@@ -93,6 +93,31 @@ export async function saveFromManifest(code: string): Promise<GithubAppRow> {
   return row;
 }
 
+// ---------- сверка с GitHub ----------
+
+/**
+ * Имя и адрес (slug) приложения — с GitHub: владелец может переименовать
+ * приложение в его настройках, и тогда меняется и `github.com/apps/<slug>`;
+ * со старым slug ссылка установки вела бы в никуда. Зовётся со страницы
+ * Settings → GitHub; ошибки GitHub не мешают странице.
+ */
+export async function syncAppInfo(app: GithubAppRow): Promise<GithubAppRow> {
+  try {
+    const res = await fetch(`${API}/app`, { headers: { ...HEADERS, Authorization: `Bearer ${appJwt(app)}` }, cache: "no-store" });
+    if (!res.ok) return app;
+    const j = (await res.json()) as { slug?: string; name?: string; html_url?: string };
+    if (!j.slug || (j.slug === app.slug && j.name === app.name && (j.html_url ?? null) === app.htmlUrl)) return app;
+    const [row] = await db
+      .update(schema.githubApps)
+      .set({ slug: j.slug, name: j.name ?? app.name, htmlUrl: j.html_url ?? app.htmlUrl })
+      .where(eq(schema.githubApps.id, app.id))
+      .returning();
+    return row;
+  } catch {
+    return app;
+  }
+}
+
 // ---------- JWT приложения и токены установок ----------
 
 function b64url(input: string | Buffer): string {
