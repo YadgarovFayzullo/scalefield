@@ -1,5 +1,6 @@
-import { notFound } from "next/navigation";
-import Image from "next/image";
+import { notFound, redirect } from "next/navigation";
+import { AccountMenu } from "@/components/account-menu";
+import { currentUser } from "@/lib/auth";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -19,8 +20,11 @@ export default async function ProjectLayout({
   params: Promise<{ project: string }>;
 }) {
   const { project: slug } = await params;
-  const [project, all] = await Promise.all([getProject(slug), listProjects()]);
-  if (!project) notFound();
+  const user = await currentUser();
+  if (!user) redirect("/login");
+  const [project, all] = await Promise.all([getProject(slug), listProjects(user.orgIds)]);
+  // Чужой проект — как несуществующий (proxy.ts уже отсёк, это вторая линия).
+  if (!project || !user.orgIds.includes(project.orgId)) notFound();
 
   const domains = Array.from(new Set(project.services.flatMap((s) => s.domains.map((d) => d.hostname))));
   const ctx: ProjectContextValue = {
@@ -44,15 +48,7 @@ export default async function ProjectLayout({
               <div className="flex-1" />
               <div className="flex items-center gap-3">
                 <ThemeToggle />
-                <button className="w-7 h-7 rounded-full overflow-hidden cursor-pointer hover:opacity-90 transition-opacity ring-2 ring-border">
-                  <Image
-                    src="/user_avatar.avif"
-                    alt="User avatar"
-                    width={26}
-                    height={26}
-                    className="w-full h-full object-cover"
-                  />
-                </button>
+                <AccountMenu account={{ name: user.name, email: user.email, avatarUrl: user.avatarUrl, isPlatformAdmin: user.isPlatformAdmin }} />
               </div>
             </div>
             <main className="flex-1">{children}</main>

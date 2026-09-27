@@ -2,14 +2,16 @@
 
 import * as React from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const params = useSearchParams();
+  const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -22,14 +24,16 @@ export default function LoginPage() {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ email, password }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(json?.error || `HTTP ${res.status}`);
         return;
       }
-      router.replace("/dashboard");
+      // Только свой путь: `next` из адреса — не открытый редирект.
+      const next = params.get("next");
+      router.replace(next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard");
       router.refresh();
     } catch (err) {
       setError(String(err));
@@ -39,34 +43,39 @@ export default function LoginPage() {
   }
 
   return (
+    <form onSubmit={submit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="email">Email</Label>
+        <Input id="email" type="email" autoComplete="email" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} required />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="password">Password</Label>
+        <Input id="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+      </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <Button type="submit" className="w-full" disabled={busy}>
+        {busy ? "Signing in…" : "Sign in"}
+      </Button>
+      <p className="text-center text-xs text-muted-foreground">Scalefield is invite-only for now. Got an invite link? Open it to create your account.</p>
+    </form>
+  );
+}
+
+export default function LoginPage() {
+  return (
     <div className="min-h-screen flex items-center justify-center bg-background p-6">
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
           <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center mb-2">
             <Image src="/scalefield.svg" alt="Scalefield" width={48} height={48} />
           </div>
-          <CardTitle>Scalefield</CardTitle>
-          <CardDescription>Панель владельца researcher.uz</CardDescription>
+          <CardTitle>Sign in to Scalefield</CardTitle>
+          <CardDescription>Deploy and run projects on your own servers</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={submit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="password">Пароль</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                autoFocus
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full" disabled={busy}>
-              {busy ? "Входим…" : "Войти"}
-            </Button>
-          </form>
+          <React.Suspense>
+            <LoginForm />
+          </React.Suspense>
         </CardContent>
       </Card>
     </div>

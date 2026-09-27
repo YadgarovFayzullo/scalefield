@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { agentRef, type AgentRef } from "@/lib/agent";
 import type { Domain, Project, Server, Service } from "@/db/schema";
@@ -15,8 +15,11 @@ export type ProjectSummary = Project & {
   services: (Service & { domains: Domain[] })[];
 };
 
-export async function listProjects(): Promise<ProjectSummary[]> {
+/** Проекты организаций пользователя (`orgIds`) — чужие не попадают даже в переключатель. */
+export async function listProjects(orgIds: string[]): Promise<ProjectSummary[]> {
+  if (orgIds.length === 0) return [];
   const rows = await db.query.projects.findMany({
+    where: inArray(schema.projects.orgId, orgIds),
     orderBy: [asc(schema.projects.createdAt)],
     with: {
       server: { columns: { id: true, name: true, host: true, provider: true } },

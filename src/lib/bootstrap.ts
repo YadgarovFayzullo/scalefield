@@ -3,6 +3,7 @@ import { eq, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { decryptSecret, encryptSecret } from "@/lib/secrets";
 import { hashAgentToken } from "@/lib/agent-token";
+import { hashPassword } from "@/lib/passwords";
 
 /**
  * Первичное заполнение control-plane из env, чтобы существующая установка
@@ -15,6 +16,35 @@ import { hashAgentToken } from "@/lib/agent-token";
  * BOOTSTRAP_SERVER_HOST.
  */
 export async function bootstrapFromEnv(): Promise<void> {
+  await bootstrapOrgFromEnv();
+  await ensureOwnerUser();
+}
+
+/**
+ * Владелец платформы при переходе с одного пароля на аккаунты: пока
+ * пользователей нет, создаётся OWNER_EMAIL с паролем из DASHBOARD_PASSWORD
+ * (владелец входит тем же паролем, только теперь с email), владелец
+ * платформы и owner всех существующих организаций. Дальше — приглашения.
+ */
+async function ensureOwnerUser(): Promise<void> {
+  const any = await db.select({ id: schema.users.id }).from(schema.users).limit(1);
+  if (any.length > 0) return;
+  const email = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
+  const password = process.env.DASHBOARD_PASSWORD;
+  if (!email || !password) {
+    console.warn("[scalefield] пользователей нет, а OWNER_EMAIL/DASHBOARD_PASSWORD не заданы — войти будет некому");
+    return;
+  }
+  const orgs = await db.select({ id: schema.organizations.id }).from(schema.organizations);
+  const passwordHash = await hashPassword(password);
+  await db.transaction(async (tx) => {
+    const [user] = await tx.insert(schema.users).values({ email, name: "Owner", passwordHash, isPlatformAdmin: true }).returning();
+    if (orgs.length) await tx.insert(schema.memberships).values(orgs.map((o) => ({ orgId: o.id, userId: user.id, role: "owner" })));
+  });
+  console.log(`[scalefield] владелец платформы ${email} создан (пароль — DASHBOARD_PASSWORD), организаций: ${orgs.length}`);
+}
+
+async function bootstrapOrgFromEnv(): Promise<void> {
   const existing = await db.select({ id: schema.organizations.id }).from(schema.organizations).limit(1);
   if (existing.length > 0) {
     await ensureAgentTokenHashes();

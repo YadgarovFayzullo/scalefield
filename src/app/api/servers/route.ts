@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { COOKIE_NAME, isValidSession } from "@/lib/session";
+import { primaryOrgId, requestUser } from "@/lib/auth";
 import { createServer, listServers, orgSshPublicKey, ServerError, type CreateServerInput } from "@/lib/servers";
 
 export const runtime = "nodejs";
@@ -11,20 +11,25 @@ export function serverError(e: unknown) {
 }
 
 export async function GET(req: NextRequest) {
-  if (!(await isValidSession(req.cookies.get(COOKIE_NAME)?.value))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requestUser(req);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const orgId = primaryOrgId(user);
   try {
-    const [servers, sshPublicKey] = await Promise.all([listServers(), orgSshPublicKey()]);
+    const [servers, sshPublicKey] = await Promise.all([listServers(user.orgIds), orgId ? orgSshPublicKey(orgId) : Promise.resolve("")]);
     return NextResponse.json({ servers, sshPublicKey });
   } catch (e) {
     return serverError(e);
   }
 }
 
-/** «Добавить сервер»: запись + фоновая установка агента по SSH; пароль в базу не попадает. */
+/** «Добавить сервер» в команду пользователя: запись + фоновая установка агента по SSH; пароль в базу не попадает. */
 export async function POST(req: NextRequest) {
-  if (!(await isValidSession(req.cookies.get(COOKIE_NAME)?.value))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requestUser(req);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const orgId = primaryOrgId(user);
+  if (!orgId) return NextResponse.json({ error: "You are not a member of any team" }, { status: 403 });
   try {
-    const server = await createServer((await req.json()) as CreateServerInput);
+    const server = await createServer((await req.json()) as CreateServerInput, orgId);
     return NextResponse.json({ server }, { status: 201 });
   } catch (e) {
     return serverError(e);

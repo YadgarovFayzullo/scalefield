@@ -1,5 +1,5 @@
 import "server-only";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { Client, utils as sshUtils } from "ssh2";
 import { db, schema } from "@/db";
 import { decryptSecret, encryptSecret } from "@/lib/secrets";
@@ -67,9 +67,11 @@ function view(s: Server, online: Set<string>): ServerView {
   };
 }
 
-export async function listServers(): Promise<ServerView[]> {
+/** Серверы организаций пользователя. */
+export async function listServers(orgIds: string[]): Promise<ServerView[]> {
+  if (orgIds.length === 0) return [];
   const [rows, online] = await Promise.all([
-    db.select().from(schema.servers).orderBy(asc(schema.servers.createdAt)),
+    db.select().from(schema.servers).where(inArray(schema.servers.orgId, orgIds)).orderBy(asc(schema.servers.createdAt)),
     relayOnline(),
   ]);
   return rows.map((s) => view(s, new Set(online.keys())));
@@ -84,19 +86,16 @@ export async function getServer(id: string): Promise<ServerDetail | null> {
 
 // ---------- SSH-ключ организации ----------
 
-async function firstOrg() {
-  const org = await db.query.organizations.findFirst({ orderBy: [asc(schema.organizations.createdAt)] });
-  if (!org) throw new ServerError("Control-plane has no organization yet", 409);
-  return org;
-}
-
 /** Публичный ключ организации — показать в форме «ключ уже на сервере». Генерируется при первом обращении. */
-export async function orgSshPublicKey(): Promise<string> {
-  return (await orgSshKey()).publicKey;
+export async function orgSshPublicKey(orgId: string): Promise<string> {
+  return (await orgSshKey(orgId)).publicKey;
 }
 
-async function orgSshKey(): Promise<{ orgId: string; publicKey: string; privateKey: string }> {
-  const org = await firstOrg();
+// Ключ — свой у каждой организации: сервер клиента доверяет только ключу
+// своей команды, а не всей платформы.
+async function orgSshKey(orgId: string): Promise<{ orgId: string; publicKey: string; privateKey: string }> {
+  const org = await db.query.organizations.findFirst({ where: eq(schema.organizations.id, orgId) });
+  if (!org) throw new ServerError("Unknown organization", 404);
   if (org.sshPublicKey && org.sshPrivateKeyEnc) {
     return { orgId: org.id, publicKey: org.sshPublicKey, privateKey: decryptSecret(org.sshPrivateKeyEnc) };
   }
@@ -140,7 +139,7 @@ function installEnv() {
   };
 }
 
-export async function createServer(input: CreateServerInput): Promise<ServerView> {
+export async function createServer(input: CreateServerInput, orgId: string): Promise<ServerView> {
   const host = (input.host || "").trim();
   if (!HOST_RE.test(host)) throw new ServerError("Host must be an IP address or hostname");
   const sshPort = input.sshPort ?? 22;
@@ -156,7 +155,7 @@ export async function createServer(input: CreateServerInput): Promise<ServerView
   if (databaseUrl && !/^postgres(ql)?:\/\//.test(databaseUrl)) throw new ServerError("Database URL must be postgresql://…");
   installEnv(); // проверить окружение до записи в базу
 
-  const { orgId } = await orgSshKey();
+  await orgSshKey(orgId); // ключ организации — до записи сервера
   const token = generateAgentToken();
   const [server] = await db
     .insert(schema.servers)
@@ -207,7 +206,7 @@ function startInstall(serverId: string, opts: InstallOptions): void {
 async function runInstall(serverId: string, opts: InstallOptions): Promise<void> {
   const server = await db.query.servers.findFirst({ where: eq(schema.servers.id, serverId) });
   if (!server) return;
-  const key = await orgSshKey();
+  const key = await orgSshKey(server.orgId);
   const env = installEnv();
 
   let log = "";

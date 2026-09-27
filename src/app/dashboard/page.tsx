@@ -7,6 +7,8 @@ import { listServersUsage } from "@/lib/servers-usage";
 import { UsageCard } from "@/components/dashboard/usage-card";
 import type { Domain } from "@/db/schema";
 import { PanelHeader } from "@/components/panel-header";
+import { redirect } from "next/navigation";
+import { currentUser } from "@/lib/auth";
 import { fmtAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -40,9 +42,11 @@ export default async function ProjectsPage() {
   let latest: Awaited<ReturnType<typeof latestDeployments>> = new Map();
   let servers: Awaited<ReturnType<typeof listServersUsage>> = [];
   let error: string | null = null;
+  const user = await currentUser();
+  if (!user) redirect("/login");
   try {
-    projects = await listProjects();
-    [latest, servers] = await Promise.all([latestDeployments(projects.map((p) => p.id)), listServersUsage()]);
+    projects = await listProjects(user.orgIds);
+    [latest, servers] = await Promise.all([latestDeployments(projects.map((p) => p.id)), listServersUsage(user.orgIds)]);
   } catch (e) {
     error = String(e);
   }
@@ -63,8 +67,7 @@ export default async function ProjectsPage() {
           </div>
         ) : projects.length === 0 ? (
           <div className="rounded-lg border border-border p-6 text-sm text-muted-foreground">
-            No projects yet. Set <span className="font-mono">STATUS_API_TOKEN</span> and{" "}
-            <span className="font-mono">GITHUB_REPOS</span>, then restart — the first project is created from them.
+            No projects yet. Start by adding a server on the <Link href="/servers" className="underline underline-offset-4">Servers</Link> page.
           </div>
         ) : (
           <div className="grid gap-6 lg:grid-cols-[280px_1fr]">

@@ -41,14 +41,54 @@ export const organizations = pgTable("organizations", {
   createdAt: createdAt(),
 });
 
-// Пользователи и членство — для мультитенантности. Сейчас вход по одному
-// паролю (DASHBOARD_PASSWORD), таблицы заполняются, когда появится
-// регистрация; схема нужна заранее, чтобы проекты сразу имели владельца.
+// Пользователи и членство. Вход — email+пароль (`password_hash`, scrypt) или
+// GitHub (`github_id`); регистрация только по приглашению (`invites`).
+// Доступ к проекту = членство в организации, которой он принадлежит.
+// `is_platform_admin` — владелец платформы: выдаёт приглашения.
 export const users = pgTable("users", {
   id: id(),
   email: text("email").notNull().unique(),
   name: text("name"),
   passwordHash: text("password_hash"),
+  githubId: text("github_id").unique(),
+  githubLogin: text("github_login"),
+  avatarUrl: text("avatar_url"),
+  isPlatformAdmin: boolean("is_platform_admin").notNull().default(false),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  createdAt: createdAt(),
+});
+
+// Сессии входа: в cookie — случайный токен, в базе — только его sha256.
+// Выход и отзыв = удаление строки (раньше cookie была детерминированной
+// функцией секрета, и отозвать одну сессию было нельзя).
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: id(),
+    tokenHash: text("token_hash").notNull().unique(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    userAgent: text("user_agent"),
+    createdAt: createdAt(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("sessions_user").on(t.userId)],
+);
+
+// Приглашения: регистрация закрыта, пока продукт сырой. Ссылка
+// /signup?invite=<токен>, в базе — хеш токена. `email` задан — только на этот
+// адрес; `org_id` задан — в эту команду с ролью `role`, иначе новая своя.
+export const invites = pgTable("invites", {
+  id: id(),
+  tokenHash: text("token_hash").notNull().unique(),
+  email: text("email"),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("member"),
+  note: text("note"),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  usedBy: uuid("used_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: createdAt(),
 });
 

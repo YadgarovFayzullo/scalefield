@@ -1,4 +1,5 @@
 import "server-only";
+import { inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { agentRef, agentRequest } from "@/lib/agent";
 import type { ServerData } from "@/lib/status";
@@ -12,8 +13,9 @@ import type { Server } from "@/db/schema";
  */
 export type ServerUsage = { server: Pick<Server, "id" | "name" | "host">; data: ServerData | null; error: string | null };
 
-export async function listServersUsage(): Promise<ServerUsage[]> {
-  const servers = await db.select().from(schema.servers);
+export async function listServersUsage(orgIds: string[]): Promise<ServerUsage[]> {
+  if (orgIds.length === 0) return [];
+  const servers = await db.select().from(schema.servers).where(inArray(schema.servers.orgId, orgIds));
   return Promise.all(
     servers.map(async (s): Promise<ServerUsage> => {
       try {

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AccountMenu } from "@/components/account-menu";
+import { currentUser } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -7,8 +9,9 @@ const NAV = [
   { href: "/servers", label: "Servers" },
 ];
 
-/** Шапка страниц верхнего уровня (список проектов, серверы): логотип, разделы, тема. */
-export function PanelHeader({ active }: { active: "/dashboard" | "/servers" }) {
+/** Шапка страниц верхнего уровня (список проектов, серверы, настройки): логотип, разделы, тема, аккаунт. */
+export async function PanelHeader({ active }: { active: "/dashboard" | "/servers" | "/settings" }) {
+  const user = await currentUser();
   return (
     <header className="flex items-center justify-between border-b border-border px-6 py-3">
       <div className="flex items-center gap-6">
@@ -31,7 +34,10 @@ export function PanelHeader({ active }: { active: "/dashboard" | "/servers" }) {
           ))}
         </nav>
       </div>
-      <ThemeToggle />
+      <div className="flex items-center gap-3">
+        <ThemeToggle />
+        {user && <AccountMenu account={{ name: user.name, email: user.email, avatarUrl: user.avatarUrl, isPlatformAdmin: user.isPlatformAdmin }} />}
+      </div>
     </header>
   );
 }

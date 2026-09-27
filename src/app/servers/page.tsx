@@ -1,6 +1,8 @@
 import { PanelHeader } from "@/components/panel-header";
 import { ServersList } from "@/components/dashboard/servers-list";
 import { listServers, orgSshPublicKey } from "@/lib/servers";
+import { currentUser, primaryOrgId } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +12,14 @@ export const dynamic = "force-dynamic";
  * отдаётся сервером, дальше клиент обновляет его сам.
  */
 export default async function ServersPage() {
+  const user = await currentUser();
+  if (!user) redirect("/login");
+  const orgId = primaryOrgId(user);
   let servers: Awaited<ReturnType<typeof listServers>> = [];
   let sshPublicKey = "";
   let error: string | null = null;
   try {
-    [servers, sshPublicKey] = await Promise.all([listServers(), orgSshPublicKey()]);
+    [servers, sshPublicKey] = await Promise.all([listServers(user.orgIds), orgId ? orgSshPublicKey(orgId) : Promise.resolve("")]);
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }

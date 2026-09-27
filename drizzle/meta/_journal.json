@@ -50,6 +50,13 @@
       "when": 1790460007084,
       "tag": "0006_server_install",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790502673908,
+      "tag": "0007_accounts",
+      "breakpoints": true
     }
   ]
 }
