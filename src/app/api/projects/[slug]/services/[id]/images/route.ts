@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { COOKIE_NAME, isValidSession } from "@/lib/session";
+import { projectAllowed } from "@/lib/auth";
 import { getProject } from "@/lib/projects";
 import { getService, serviceImages } from "@/lib/services";
 
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 // Успешно задеплоенные образы сервиса — список для отката.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string; id: string }> }) {
-  if (!(await isValidSession(req.cookies.get(COOKIE_NAME)?.value))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await projectAllowed(req, params))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { slug, id } = await params;
   const project = await getProject(slug);
   if (!project) return NextResponse.json({ error: "Unknown project" }, { status: 404 });

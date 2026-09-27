@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { COOKIE_NAME, isValidSession } from "@/lib/session";
+import { projectAllowed } from "@/lib/auth";
 import { describeTable, getProjectDatabase, ProjectDbError } from "@/lib/project-db";
 import {
   addColumn,
@@ -21,7 +21,7 @@ type Ctx = { params: Promise<{ slug: string; schema: string; table: string }> };
 
 // Схема таблицы: колонки и индексы.
 export async function GET(req: NextRequest, { params }: Ctx) {
-  if (!(await isValidSession(req.cookies.get(COOKIE_NAME)?.value))) {
+  if (!(await projectAllowed(req, params))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { slug, schema, table } = await params;
@@ -45,7 +45,7 @@ type Action =
 
 // DDL-операции над таблицей. Каждая — отдельный запрос, Postgres сам валидирует.
 export async function POST(req: NextRequest, { params }: Ctx) {
-  if (!(await isValidSession(req.cookies.get(COOKIE_NAME)?.value))) {
+  if (!(await projectAllowed(req, params))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { slug, schema, table } = await params;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { projectAllowed } from "@/lib/auth";
 import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { COOKIE_NAME, isValidSession } from "@/lib/session";
 import { getProject } from "@/lib/projects";
 import { agentRef, AgentError } from "@/lib/agent";
 import { agentSql } from "@/lib/project-conn";
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
  * Одна база на проект: повторный вызов заменяет строку.
  */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
-  if (!(await isValidSession(req.cookies.get(COOKIE_NAME)?.value))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await projectAllowed(req, params))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { slug } = await params;
   const project = await getProject(slug);
   if (!project) return NextResponse.json({ error: "Unknown project" }, { status: 404 });

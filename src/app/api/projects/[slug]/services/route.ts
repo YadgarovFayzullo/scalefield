@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { COOKIE_NAME, isValidSession } from "@/lib/session";
+import { projectAllowed } from "@/lib/auth";
 import { getProject } from "@/lib/projects";
 import { createService, listServices, ServiceError, type ServiceInput } from "@/lib/services";
 import { AgentError } from "@/lib/agent";
@@ -13,7 +13,7 @@ export function serviceError(e: unknown) {
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
-  if (!(await isValidSession(req.cookies.get(COOKIE_NAME)?.value))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await projectAllowed(req, params))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { slug } = await params;
   const project = await getProject(slug);
   if (!project) return NextResponse.json({ error: "Unknown project" }, { status: 404 });
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
-  if (!(await isValidSession(req.cookies.get(COOKIE_NAME)?.value))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await projectAllowed(req, params))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { slug } = await params;
   const project = await getProject(slug);
   if (!project) return NextResponse.json({ error: "Unknown project" }, { status: 404 });

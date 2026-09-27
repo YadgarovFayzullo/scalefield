@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { COOKIE_NAME, isValidSession } from "@/lib/session";
+import { projectAllowed } from "@/lib/auth";
 import { buildSelect, getProjectDatabase } from "@/lib/project-db";
 import { dbError } from "../../../route";
 
@@ -14,7 +14,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ slug: string; schema: string; table: string }> },
 ) {
-  if (!(await isValidSession(req.cookies.get(COOKIE_NAME)?.value))) {
+  if (!(await projectAllowed(req, params))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { slug, schema, table } = await params;

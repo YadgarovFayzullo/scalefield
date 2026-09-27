@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { COOKIE_NAME, isValidSession } from "@/lib/session";
+import { projectAllowed } from "@/lib/auth";
 import {
   deleteRows,
   fetchRows,
@@ -17,9 +17,7 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ slug: string; schema: string; table: string }> };
 
-async function authed(req: NextRequest): Promise<boolean> {
-  return isValidSession(req.cookies.get(COOKIE_NAME)?.value);
-}
+
 
 const FILTER_OPS: FilterOp[] = ["eq", "neq", "gt", "gte", "lt", "lte", "like", "null", "notnull"];
 
@@ -45,7 +43,7 @@ function cells(input: unknown): Record<string, CellValue> {
 
 // Страница строк с колонками, PK и счётчиком.
 export async function GET(req: NextRequest, { params }: Ctx) {
-  if (!(await authed(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await projectAllowed(req, params))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { slug, schema, table } = await params;
   const sp = req.nextUrl.searchParams;
   try {
@@ -65,7 +63,7 @@ export async function GET(req: NextRequest, { params }: Ctx) {
 
 // Правка одной строки: { pk: {...}, set: {...} }.
 export async function PATCH(req: NextRequest, { params }: Ctx) {
-  if (!(await authed(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await projectAllowed(req, params))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { slug, schema, table } = await params;
   try {
     const body = (await req.json()) as { pk?: unknown; set?: unknown; db?: string };
@@ -79,7 +77,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
 
 // Вставка: { values: {...} } — незаполненные колонки берут default.
 export async function POST(req: NextRequest, { params }: Ctx) {
-  if (!(await authed(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await projectAllowed(req, params))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { slug, schema, table } = await params;
   try {
     const body = (await req.json()) as { values?: unknown; db?: string };
@@ -93,7 +91,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 
 // Удаление: { keys: [{pk...}, ...] }.
 export async function DELETE(req: NextRequest, { params }: Ctx) {
-  if (!(await authed(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await projectAllowed(req, params))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { slug, schema, table } = await params;
   try {
     const body = (await req.json()) as { keys?: unknown[]; db?: string };

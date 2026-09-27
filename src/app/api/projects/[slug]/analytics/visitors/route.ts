@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { COOKIE_NAME, isValidSession } from "@/lib/session";
+import { projectAllowed } from "@/lib/auth";
 import { getProjectAgent } from "@/lib/projects";
 import { AgentError, agentRequest } from "@/lib/agent";
 import { hasTrackedViews, visitorsFromDb } from "@/lib/visitors-db";
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  * только когда это действительно так, а не всегда.
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
-  if (!(await isValidSession(req.cookies.get(COOKIE_NAME)?.value))) {
+  if (!(await projectAllowed(req, params))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { slug } = await params;

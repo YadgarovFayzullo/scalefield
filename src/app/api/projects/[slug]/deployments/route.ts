@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { projectAllowed } from "@/lib/auth";
 import { desc, eq, sql } from "drizzle-orm";
-import { COOKIE_NAME, isValidSession } from "@/lib/session";
 import { db, schema } from "@/db";
 import { getProject, projectRepos } from "@/lib/projects";
 import { deploymentToItem, syncDeployment } from "@/lib/services";
@@ -107,8 +107,7 @@ async function syncProject(projectId: string): Promise<string[]> {
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
-  const token = req.cookies.get(COOKIE_NAME)?.value;
-  if (!(await isValidSession(token))) {
+  if (!(await projectAllowed(req, params))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { slug } = await params;

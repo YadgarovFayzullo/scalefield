@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { canAccessProject, canAccessServer, COOKIE_NAME, getSessionUser } from "@/lib/auth";
 
-// Гейт всей панели (в Next 16 proxy выполняется в Node — база доступна).
-// 1) Без сессии пускаем только вход, регистрацию по приглашению и публичные
-//    ручки; API отвечает 401 JSON, страницы уезжают на /login.
-// 2) Проект и сервер видны только участникам их организации: чужой slug/id —
-//    404, как будто его нет (не 403 — не подтверждаем, что он существует).
-//    Route handler'ам остаётся проверять лишь то, что специфично для них.
-const PROJECT_RE = /^\/(?:p|api\/projects)\/([^/]+)/;
-const SERVER_RE = /^\/(?:servers|api\/servers)\/([0-9a-f-]{36})(?:\/|$)/;
+// Гейт всей панели — первая линия. Proxy в продакшн-сборке Next 16
+// собирается под edge (без net/tls — драйвер Postgres не работает), поэтому
+// здесь только «есть ли cookie сессии нужного формата»; живость сессии и
+// членство в организации проверяют сами ручки (`projectAllowed`,
+// `serverAllowed`, `requestUser` в src/lib/auth.ts) и страницы
+// (`currentUser`). Dev-сервер гоняет proxy в Node и этой разницы не
+// показывает — проверять сборкой.
+const COOKIE_NAME = "scalefield_session";
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -28,29 +27,14 @@ export async function proxy(req: NextRequest) {
     pathname.startsWith("/api/internal/");
   if (isPublic) return NextResponse.next();
 
-  const isApi = pathname.startsWith("/api/");
-  const user = await getSessionUser(req.cookies.get(COOKIE_NAME)?.value);
-  if (!user) {
-    if (isApi) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const url = req.nextUrl.clone();
-    url.pathname = "/login";
-    url.search = pathname === "/" || pathname === "/dashboard" ? "" : `?next=${encodeURIComponent(pathname)}`;
-    return NextResponse.redirect(url);
+  if (req.cookies.get(COOKIE_NAME)?.value?.startsWith("sfs_")) return NextResponse.next();
+
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  const project = PROJECT_RE.exec(pathname);
-  if (project && !(await canAccessProject(user, decodeURIComponent(project[1])))) return notFound(req, isApi);
-  const server = SERVER_RE.exec(pathname);
-  if (server && !(await canAccessServer(user, server[1]))) return notFound(req, isApi);
-
-  return NextResponse.next();
-}
-
-function notFound(req: NextRequest, isApi: boolean) {
-  if (isApi) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const url = req.nextUrl.clone();
-  url.pathname = "/dashboard";
-  url.search = "";
+  url.pathname = "/login";
+  url.search = pathname === "/" || pathname === "/dashboard" ? "" : `?next=${encodeURIComponent(pathname)}`;
   return NextResponse.redirect(url);
 }
 

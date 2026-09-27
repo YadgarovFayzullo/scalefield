@@ -102,6 +102,27 @@ export function primaryOrgId(user: SessionUser): string | null {
   return (managed ?? user.memberships[0])?.orgId ?? null;
 }
 
+/**
+ * Гейт route handler'а проекта: живая сессия И членство в организации
+ * проекта. Зовётся первой строкой каждой ручки `/api/projects/<slug>/…` —
+ * proxy.ts собирается под edge, базы там нет, и он проверяет только
+ * наличие cookie. Чужой и несуществующий проект неотличимы (одинаковый 401).
+ */
+export async function projectAllowed(req: NextRequest, params: Promise<{ slug: string }>): Promise<boolean> {
+  const user = await requestUser(req);
+  if (!user) return false;
+  const { slug } = await params;
+  return canAccessProject(user, slug);
+}
+
+/** То же для ручек `/api/servers/<id>`. */
+export async function serverAllowed(req: NextRequest, params: Promise<{ id: string }>): Promise<boolean> {
+  const user = await requestUser(req);
+  if (!user) return false;
+  const { id } = await params;
+  return canAccessServer(user, id);
+}
+
 export async function canAccessProject(user: SessionUser, slug: string): Promise<boolean> {
   if (user.orgIds.length === 0) return false;
   const rows = await db

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { COOKIE_NAME, isValidSession } from "@/lib/session";
+import { projectAllowed } from "@/lib/auth";
 import { getProjectDatabase, listTables, ProjectDbError } from "@/lib/project-db";
 import { AgentError } from "@/lib/agent";
 import { createTable, type NewColumn } from "@/lib/project-schema";
@@ -9,8 +9,7 @@ export const dynamic = "force-dynamic";
 
 // Список таблиц и представлений базы проекта (для левой колонки редактора).
 export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
-  const token = req.cookies.get(COOKIE_NAME)?.value;
-  if (!(await isValidSession(token))) {
+  if (!(await projectAllowed(req, params))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { slug } = await params;
@@ -25,8 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
 
 // Создание таблицы: { schema, name, columns: [{ name, type, nullable, default, pk }] }.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
-  const token = req.cookies.get(COOKIE_NAME)?.value;
-  if (!(await isValidSession(token))) {
+  if (!(await projectAllowed(req, params))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { slug } = await params;

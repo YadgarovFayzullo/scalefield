@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { COOKIE_NAME, isValidSession } from "@/lib/session";
+import { projectAllowed } from "@/lib/auth";
 import { getProjectAgent } from "@/lib/projects";
 import { AgentError, agentRaw, type AgentRawResponse } from "@/lib/agent";
 import { listServices } from "@/lib/services";
@@ -53,8 +53,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ slug: string; path: string[] }> },
 ) {
-  const token = req.cookies.get(COOKIE_NAME)?.value;
-  if (!(await isValidSession(token))) {
+  if (!(await projectAllowed(req, params))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
