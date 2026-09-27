@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { decryptSecret } from "@/lib/secrets";
-import { agentRef } from "@/lib/agent";
+import { agentRef, type AgentRef } from "@/lib/agent";
 import { agentSql, type ProjectSql, type SqlParam } from "@/lib/project-conn";
 
 /**
@@ -73,7 +73,30 @@ export class ProjectDbError extends Error {
   }
 }
 
+/** Текст ошибки «у проекта нет базы» — по нему UI показывает форму подключения. */
+export const NO_DATABASE = "Project has no database registered";
+
+/**
+ * База проекта и агент, который до неё достаёт, без открытия соединения —
+ * для метрик (раздел Database, плашка Overview). `null` — базы у проекта нет:
+ * показывать «не подключена», а не данные какой-то другой базы сервера.
+ */
+export async function getProjectDatabaseTarget(slug: string): Promise<{ agent: AgentRef; url: string; name: string } | null> {
+  try {
+    const { database, agent, url } = await resolveProjectDatabase(slug);
+    return { agent, url, name: database.name };
+  } catch (e) {
+    if (e instanceof ProjectDbError && e.message === NO_DATABASE) return null;
+    throw e;
+  }
+}
+
 export async function getProjectDatabase(slug: string, dbId?: string) {
+  const { project, database, agent, url } = await resolveProjectDatabase(slug, dbId);
+  return { project, database, sql: agentSql(agent, url) };
+}
+
+async function resolveProjectDatabase(slug: string, dbId?: string) {
   const project = await db.query.projects.findFirst({ where: eq(schema.projects.slug, slug) });
   if (!project) throw new ProjectDbError("Unknown project", 404);
   const rows = await db
@@ -87,15 +110,14 @@ export async function getProjectDatabase(slug: string, dbId?: string) {
     .orderBy(asc(schema.databases.createdAt))
     .limit(1);
   const database = rows[0];
-  if (!database) throw new ProjectDbError("Project has no database registered", 404);
+  if (!database) throw new ProjectDbError(NO_DATABASE, 404);
   if (!database.urlEnc) throw new ProjectDbError("Database has no connection string", 409);
   // Агент — сервера базы, а если у базы он не указан, сервера проекта.
   const serverId = database.serverId ?? project.serverId;
   if (!serverId) throw new ProjectDbError("Database has no server with an agent", 409);
   const server = await db.query.servers.findFirst({ where: eq(schema.servers.id, serverId) });
   if (!server) throw new ProjectDbError("Database server not found", 409);
-  const sql = agentSql(agentRef(server), decryptSecret(database.urlEnc));
-  return { project, database, sql };
+  return { project, database, agent: agentRef(server), url: decryptSecret(database.urlEnc) };
 }
 
 type Sql = ProjectSql;

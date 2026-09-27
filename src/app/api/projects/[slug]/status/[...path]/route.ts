@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { COOKIE_NAME, isValidSession } from "@/lib/session";
 import { getProjectAgent } from "@/lib/projects";
-import { AgentError, agentRaw } from "@/lib/agent";
+import { AgentError, agentRaw, type AgentRawResponse } from "@/lib/agent";
 import { listServices } from "@/lib/services";
 import { projectContainerFilter } from "@/lib/container-scope";
+import { getProjectDatabaseTarget, NO_DATABASE } from "@/lib/project-db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,10 +13,16 @@ export const dynamic = "force-dynamic";
 // control-plane (таблица servers), токен в браузер не попадает — клиент ходит
 // сюда под своей сессией.
 //
-// Только известные пути — чтобы прокси не стал SSRF. Query-параметры
-// (limit/level/host/name/tail) пробрасываем как есть: их валидирует агент,
-// но `name` у container-logs проверяем сами (см. ниже) — иначе один проект
-// на общем сервере читал бы логи чужого контейнера.
+// Только известные пути — чтобы прокси не стал SSRF. И главное правило:
+// каждый ответ — про ЭТОТ проект, а не про весь сервер. Агент один на
+// сервер и знает всё, что на нём есть (контейнеры, лог прокси, базы), поэтому
+// срез делаем здесь:
+//  - summary/server — контейнеры только проекта (container-scope);
+//  - database/summary — база проекта из `databases`, а не та, что прописана
+//    агенту; нет базы — «не подключена», а не чужие цифры;
+//  - api/logs/visitors — только запросы к доменам проекта; нет доменов —
+//    «не настроено» (трафик на сервере различается только по домену);
+//  - container-logs — только контейнер проекта.
 const ALLOWED = new Set(["summary", "server", "database", "api", "content", "logs", "container-logs", "visitors"]);
 
 // Ключи, под которыми в ответе агента лежит список контейнеров хоста —
@@ -24,6 +31,9 @@ const CONTAINER_LIST_PATHS: Record<string, string[]> = {
   summary: ["server", "containers"],
   server: ["containers"],
 };
+
+// Разделы, которые на общем сервере различаются только по домену запроса.
+const BY_DOMAIN = new Set(["api", "logs", "visitors"]);
 
 function filterContainers(body: unknown, path: string[], belongs: (name: string) => boolean): unknown {
   if (body == null || typeof body !== "object") return body;
@@ -67,10 +77,9 @@ export async function GET(
     return NextResponse.json({ error: "Content metrics are disabled for this project" }, { status: 404 });
   }
 
-  // Только для путей, которым нужна принадлежность контейнера — не тянуть
-  // сервисы проекта на каждый опрос трафика/БД/логов зря.
-  const needsScope = key in CONTAINER_LIST_PATHS || key === "container-logs";
-  const belongs = needsScope ? projectContainerFilter(slug, await listServices(agent.project.id)) : null;
+  const needsServices = key in CONTAINER_LIST_PATHS || key === "container-logs" || BY_DOMAIN.has(key);
+  const services = needsServices ? await listServices(agent.project.id) : [];
+  const belongs = key in CONTAINER_LIST_PATHS || key === "container-logs" ? projectContainerFilter(slug, services) : null;
 
   if (key === "container-logs") {
     const name = req.nextUrl.searchParams.get("name") || "";
@@ -80,17 +89,32 @@ export async function GET(
   }
 
   const qsParams = new URLSearchParams(req.nextUrl.search);
-  // Визиты общего сервера режем до доменов ЭТОГО проекта — иначе на общем
-  // сервере "Visitors" одного проекта показывал бы трафик другого (тот же
-  // принцип, что и у container-scope, только по хосту, а не по имени
-  // контейнера).
-  if (key === "visitors") {
-    const domains = (await listServices(agent.project.id)).flatMap((s) => s.domains);
-    if (domains.length > 0) qsParams.set("hosts", domains.join(","));
+  if (BY_DOMAIN.has(key)) {
+    const domains = services.flatMap((s) => s.domains);
+    if (domains.length === 0) {
+      return NextResponse.json(
+        { error: "Project has no domains — traffic on a shared server is matched by the project's domains. Add one in Services." },
+        { status: 404 },
+      );
+    }
+    qsParams.set("hosts", domains.join(","));
+    // Фильтр по одному хосту из UI — только среди доменов проекта.
+    const host = qsParams.get("host");
+    if (host && !domains.includes(host)) qsParams.delete("host");
   }
   const qs = qsParams.toString() ? `?${qsParams.toString()}` : "";
+
   try {
-    const upstream = await agentRaw(agent, `/status/${key}${qs}`, { timeoutMs: 20000 });
+    let upstream: AgentRawResponse;
+    if (key === "database" || key === "summary") {
+      const target = await getProjectDatabaseTarget(slug);
+      if (key === "database" && !target) {
+        return NextResponse.json({ error: NO_DATABASE }, { status: 404 });
+      }
+      upstream = await agentRaw(agent, `/status/${key}`, { method: "POST", body: { url: target?.url ?? null }, timeoutMs: 20000 });
+    } else {
+      upstream = await agentRaw(agent, `/status/${key}${qs}`, { timeoutMs: 20000 });
+    }
     let body = upstream.text;
     if (upstream.status === 200 && belongs && key in CONTAINER_LIST_PATHS) {
       try {
@@ -99,6 +123,15 @@ export async function GET(
       } catch {
         // Ответ не JSON или неожиданной формы — отдаём как есть, лучше
         // показать чужое один раз, чем сломать раздел полностью.
+      }
+    }
+    if (upstream.status !== 200) {
+      // Ошибка агента — в поле error, которое читает useMetric.
+      try {
+        const detail = (JSON.parse(body) as { detail?: unknown }).detail;
+        if (typeof detail === "string") body = JSON.stringify({ error: detail });
+      } catch {
+        /* оставляем как есть */
       }
     }
     return new NextResponse(body, {

@@ -11,6 +11,7 @@ import time
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from app.collectors.api_traffic import collect_access_logs, collect_api_traffic
 from app.collectors.visitors import collect_visitors
@@ -69,8 +70,17 @@ async def healthz() -> dict:
     return {"ok": True, "uptime_s": int(time.time() - _STARTED_AT)}
 
 
-@app.get("/status/summary", dependencies=[Depends(require_token)])
-async def summary() -> dict:
+class DbTarget(BaseModel):
+    """База проекта для метрик. `url = None` — у проекта базы нет."""
+
+    url: str | None = None
+
+
+def _hosts(hosts: str) -> tuple[str, ...] | None:
+    return tuple(h.strip() for h in hosts.split(",") if h.strip()) or None
+
+
+async def _summary(dsn: str | None, include_db: bool) -> dict:
     """Компактная сводка для верхней плашки дашборда: всё живо/нет + ключевое."""
     out: dict = {"ts": int(time.time()), "api_uptime_s": int(time.time() - _STARTED_AT)}
 
@@ -92,9 +102,13 @@ async def summary() -> dict:
         out["server_ok"] = False
         out["server_error"] = str(e)
 
-    # БД
+    # БД проекта. Нет базы — не «упала», а «не подключена» (db_ok = None).
+    if not include_db:
+        out["db_ok"] = None
+        out["healthy"] = out.get("server_ok", False)
+        return out
     try:
-        pool = await get_pool()
+        pool = await get_pool(dsn)
         async with pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
             size = await conn.fetchval("SELECT pg_size_pretty(pg_database_size(current_database()))")
@@ -111,6 +125,17 @@ async def summary() -> dict:
     return out
 
 
+@app.get("/status/summary", dependencies=[Depends(require_token)])
+async def summary() -> dict:
+    return await _summary(None, True)
+
+
+@app.post("/status/summary", dependencies=[Depends(require_token)])
+async def summary_for(target: DbTarget) -> dict:
+    """Сводка для проекта: база — та, что прислал control-plane (или никакой)."""
+    return await _summary(target.url, target.url is not None)
+
+
 @app.get("/status/server", dependencies=[Depends(require_token)])
 async def server() -> dict:
     return await collect_server()
@@ -119,6 +144,17 @@ async def server() -> dict:
 @app.get("/status/database", dependencies=[Depends(require_token)])
 async def database() -> dict:
     return await collect_database()
+
+
+@app.post("/status/database", dependencies=[Depends(require_token)])
+async def database_for(target: DbTarget) -> dict:
+    """Метрики базы проекта по строке подключения из control-plane."""
+    if not target.url:
+        raise HTTPException(status_code=400, detail="url required")
+    try:
+        return await collect_database(target.url)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"database: {e}") from e
 
 
 @app.get("/status/visitors", dependencies=[Depends(require_token)])
@@ -130,13 +166,13 @@ async def visitors(
     устройства — за `days` дней (по умолчанию неделя, как в Vercel Analytics).
     `hosts` — список через запятую, чтобы на общем сервере проект видел
     только свой трафик (тот же принцип, что и `/status/logs?host=`)."""
-    host_list = tuple(h.strip() for h in hosts.split(",") if h.strip()) or None
-    return await collect_visitors(days, host_list)
+    return await collect_visitors(days, _hosts(hosts))
 
 
 @app.get("/status/api", dependencies=[Depends(require_token)])
-async def api_traffic() -> dict:
-    return await collect_api_traffic()
+async def api_traffic(hosts: str = Query("")) -> dict:
+    """HTTP-трафик по access-логу прокси; `hosts` — домены проекта через запятую."""
+    return await collect_api_traffic(_hosts(hosts))
 
 
 @app.get("/status/content", dependencies=[Depends(require_token)])
@@ -149,9 +185,11 @@ async def access_logs(
     limit: int = Query(200, ge=1, le=1000),
     level: str = Query("all", pattern="^(all|warn|error)$"),
     host: str = Query(""),
+    hosts: str = Query(""),
 ) -> dict:
-    """Последние записи access-лога прокси (новые первыми)."""
-    return await collect_access_logs(limit=limit, level=level, host=host)
+    """Последние записи access-лога прокси (новые первыми). `hosts` — домены
+    проекта (обязательный срез на общем сервере), `host` — фильтр внутри них."""
+    return await collect_access_logs(limit=limit, level=level, host=host, hosts=_hosts(hosts))
 
 
 @app.get("/status/container-logs", dependencies=[Depends(require_token)])

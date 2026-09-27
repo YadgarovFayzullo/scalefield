@@ -13,8 +13,8 @@ _SLOW_Q_SQL = """
 """
 
 
-async def collect_database() -> dict:
-    pool = await get_pool()
+async def collect_database(dsn: str | None = None) -> dict:
+    pool = await get_pool(dsn)
     async with pool.acquire() as conn:
         size = await conn.fetchval(
             "SELECT pg_database_size(current_database())"

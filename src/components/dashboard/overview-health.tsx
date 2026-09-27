@@ -11,7 +11,10 @@ import { toneChip, toneText, type Tone } from "@/components/dashboard/overview-p
 
 // ---------- health plate ----------
 
-function okChip(label: string, ok: boolean) {
+function okChip(label: string, ok: boolean | null) {
+  if (ok === null) {
+    return <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{label}: not connected</span>;
+  }
   return (
     <span
       className={`text-xs px-2 py-0.5 rounded-full ${ok ? toneChip.ok : toneChip.bad}`}

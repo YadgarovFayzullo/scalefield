@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { useMetric, type DatabaseData } from "@/lib/status";
+import { ConnectDatabase, NO_DATABASE } from "@/components/dashboard/connect-database";
 import { DatabaseStatCards } from "@/components/dashboard/database-stat-cards";
 import { DatabaseSizeChart, DatabaseTablesCard } from "@/components/dashboard/database-tables";
 import { LongestRunningCard, SlowQueriesCard } from "@/components/dashboard/database-queries";
@@ -130,6 +131,8 @@ export default function DatabasePage() {
 
       {loading && !data ? (
         <LoadingState />
+      ) : !data && error === NO_DATABASE ? (
+        <ConnectDatabase onConnected={handleRefresh} />
       ) : !data ? (
         <ErrorState message={error ?? "Empty response"} onRetry={handleRefresh} />
       ) : (

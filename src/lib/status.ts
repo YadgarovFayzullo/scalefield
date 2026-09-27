@@ -153,7 +153,8 @@ export type SummaryData = {
   api_uptime_s: number;
   healthy: boolean;
   server_ok: boolean;
-  db_ok: boolean;
+  /** null — у проекта нет подключённой базы (не «упала», а «не подключена»). */
+  db_ok: boolean | null;
   server?: {
     cpu_pct: number;
     mem_pct: number;

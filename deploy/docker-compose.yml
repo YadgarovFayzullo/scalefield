@@ -33,7 +33,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/apps:/opt/apps
       - /var/log/traefik:/var/log/traefik:ro
-    networks: [backend_internal, relay_internal]
+    # Сети баз проектов этого сервера: агенту нужен доступ к Postgres
+    # каждого проекта (раздел Database, редактор таблиц). В нескольких сетях
+    # имя `db` неоднозначно — базы адресуются именем контейнера
+    # (backend-db-1, qrtifact-db-1).
+    networks: [backend_internal, qrtifact_internal, relay_internal]
     depends_on: [relay]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
@@ -85,6 +89,8 @@ networks:
   edge:
     external: true
   backend_internal:
+    external: true
+  qrtifact_internal:
     external: true
   # Внутренняя сеть control-plane ↔ relay ↔ локальный агент.
   relay_internal: {}

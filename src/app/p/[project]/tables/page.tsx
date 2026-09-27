@@ -6,6 +6,7 @@ import { api, type TableInfo, type TablesResult } from "@/lib/tables";
 import { TableList } from "@/components/dashboard/table-editor-list";
 import { TableGrid } from "@/components/dashboard/table-editor-grid";
 import { CreateTableSheet } from "@/components/dashboard/table-editor-create";
+import { ConnectDatabase, NO_DATABASE } from "@/components/dashboard/connect-database";
 
 /** Редактор таблиц базы проекта (аналог Table Editor в Supabase). */
 export default function TablesPage() {
@@ -68,6 +69,15 @@ export default function TablesPage() {
             void reload();
           }}
         />
+      ) : error === NO_DATABASE ? (
+        <div className="flex flex-1 items-center justify-center p-6">
+          <ConnectDatabase
+            onConnected={() => {
+              setLoading(true);
+              void reload();
+            }}
+          />
+        </div>
       ) : (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           {error ? error : dbName ? `Database ${dbName} — pick a table` : "Pick a table"}

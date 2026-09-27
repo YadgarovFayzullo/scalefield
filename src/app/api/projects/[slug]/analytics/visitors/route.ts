@@ -39,8 +39,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
 
   // На общем сервере трафик режем по доменам проекта — тот же принцип, что
   // у общего прокси /status/[...path] для этого же ключа.
+  // Без доменов разбор лога отдал бы трафик всего сервера — чужих проектов.
   const domains = (await listServices(agent.project.id)).flatMap((s) => s.domains);
-  const hostsQs = domains.length > 0 ? `&hosts=${encodeURIComponent(domains.join(","))}` : "";
+  if (domains.length === 0) {
+    return NextResponse.json(
+      { error: "Project has no domains — add one in Services, or install the <Analytics /> tracker." },
+      { status: 404 },
+    );
+  }
+  const hostsQs = `&hosts=${encodeURIComponent(domains.join(","))}`;
   try {
     const body = await agentRequest<VisitorsData>(agent, `/status/visitors?days=${days}${hostsQs}`, { timeoutMs: 20000 });
     return NextResponse.json({ ...body, source: "logs" });

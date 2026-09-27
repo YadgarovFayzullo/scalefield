@@ -137,7 +137,7 @@ def _percentile(values: list[float], p: float) -> float:
     return values[lo] * (1 - frac) + values[hi] * frac
 
 
-def _traffic_sync() -> dict:
+def _traffic_sync(only_hosts: tuple[str, ...] | None = None) -> dict:
     path = settings.CADDY_ACCESS_LOG
     if not path or not os.path.exists(path):
         return {"configured": False}
@@ -160,6 +160,10 @@ def _traffic_sync() -> dict:
         buckets[b] = {"ts": b, "requests": 0, "e4xx": 0, "e5xx": 0, "bytes": 0, "durs": []}
 
     for r in _iter_records(path, settings.CADDY_LOG_TAIL_BYTES):
+        # На общем сервере проект видит только запросы к своим доменам.
+        # (Не `hosts`: так ниже называется счётчик запросов по хостам.)
+        if only_hosts and r["host"] not in only_hosts:
+            continue
         ts = r["ts"]
         if ts is not None and ts < cutoff:
             continue
@@ -241,7 +245,7 @@ def _traffic_sync() -> dict:
     }
 
 
-def _logs_sync(limit: int, level: str, host: str) -> dict:
+def _logs_sync(limit: int, level: str, host: str, hosts: tuple[str, ...] | None = None) -> dict:
     """Последние записи access-лога, новые первыми.
 
     level: all | error (5xx) | warn (4xx и 5xx). host — фильтр по RequestHost.
@@ -257,6 +261,8 @@ def _logs_sync(limit: int, level: str, host: str) -> dict:
             return False
         if host and r["host"] != host:
             return False
+        if hosts and r["host"] not in hosts:
+            return False
         return True
 
     items = [r for r in _iter_records(path, settings.CADDY_LOG_TAIL_BYTES) if keep(r)]
@@ -268,9 +274,9 @@ def _logs_sync(limit: int, level: str, host: str) -> dict:
     return {"configured": True, "items": items}
 
 
-async def collect_api_traffic() -> dict:
-    return await asyncio.to_thread(_traffic_sync)
+async def collect_api_traffic(hosts: tuple[str, ...] | None = None) -> dict:
+    return await asyncio.to_thread(_traffic_sync, hosts)
 
 
-async def collect_access_logs(limit: int = 200, level: str = "all", host: str = "") -> dict:
-    return await asyncio.to_thread(_logs_sync, limit, level, host)
+async def collect_access_logs(limit: int = 200, level: str = "all", host: str = "", hosts: tuple[str, ...] | None = None) -> dict:
+    return await asyncio.to_thread(_logs_sync, limit, level, host, hosts)
