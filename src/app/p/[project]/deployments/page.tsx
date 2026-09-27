@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { fmtAgo, useMetric, type DeploymentsData } from "@/lib/status";
-import { environmentOf, runState, shortRepo, STATE_CONFIG, type Environment, type RunState } from "@/components/dashboard/deployments-status";
+import { currentProductionIds, environmentOf, runState, shortRepo, STATE_CONFIG, type Environment, type RunState } from "@/components/dashboard/deployments-status";
 import { DeploymentRow } from "@/components/dashboard/deployments-row";
 
 /**
@@ -92,6 +92,7 @@ export default function DeploymentsPage() {
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
 
   const items = React.useMemo(() => data?.items ?? [], [data]);
+  const liveIds = React.useMemo(() => currentProductionIds(items), [items]);
   const repos = React.useMemo(() => Array.from(new Set(items.map((d) => d.repo).filter(Boolean))).sort(), [items]);
   const authors = React.useMemo(() => Array.from(new Set(items.map((d) => d.actor).filter(Boolean))).sort(), [items]);
 
@@ -218,7 +219,7 @@ export default function DeploymentsPage() {
         ) : (
           <>
             {visible.map((d) => (
-              <DeploymentRow key={d.id} deployment={d} href={`${pathBase}/deployments/${encodeURIComponent(d.id)}`} />
+              <DeploymentRow key={d.id} deployment={d} current={liveIds.has(d.id)} href={`${pathBase}/deployments/${encodeURIComponent(d.id)}`} />
             ))}
             {visibleCount < filtered.length && (
               <div className="flex justify-center border-b border-border py-4">

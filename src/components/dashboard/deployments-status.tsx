@@ -67,6 +67,24 @@ export function environmentOf(d: Deployment): Environment {
   return d.branch === "main" ? "production" : "preview";
 }
 
+/**
+ * Какие деплои СЕЙЧАС работают в проде — как метка Current у Vercel. По
+ * каждой цели (сервис у деплоя через агента, репозиторий у GitHub Actions)
+ * это самый свежий УСПЕШНЫЙ прод-деплой: упавший или ещё идущий прогон
+ * в прод не попал, и живым остаётся предыдущий. Считается по всему списку,
+ * а не по отфильтрованному, — фильтр не должен менять, что «в проде».
+ */
+export function currentProductionIds(deployments: Deployment[]): Set<string> {
+  const newest = new Map<string, Deployment>();
+  for (const d of deployments) {
+    if (environmentOf(d) !== "production" || runState(d) !== "success") continue;
+    const target = d.source === "scalefield" ? `service:${d.service ?? ""}` : `repo:${d.repo}`;
+    const prev = newest.get(target);
+    if (!prev || new Date(d.created_at).getTime() > new Date(prev.created_at).getTime()) newest.set(target, d);
+  }
+  return new Set([...newest.values()].map((d) => d.id));
+}
+
 type StateConfig = {
   label: string;
   color: string;

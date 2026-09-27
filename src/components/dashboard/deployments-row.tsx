@@ -25,7 +25,7 @@ const DOT_COLOR: Record<string, string> = {
  * таблице Vercel. Последняя колонка резиновая и прижимает время/аватар/«...»
  * к правому краю.
  */
-export function DeploymentRow({ deployment: d, href }: { deployment: Deployment; href: string }) {
+export function DeploymentRow({ deployment: d, href, current = false }: { deployment: Deployment; href: string; current?: boolean }) {
   const state = runState(d);
   const config = STATE_CONFIG[state];
   const env = environmentOf(d);
@@ -47,11 +47,19 @@ export function DeploymentRow({ deployment: d, href }: { deployment: Deployment;
         <span className="text-sm text-muted-foreground">{fmtDuration(d.duration_s)}</span>
       </span>
 
-      {env === "production" ? (
-        <span className="hidden w-fit shrink-0 items-center gap-1.5 rounded-full bg-blue-500 py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-white sm:inline-flex">
+      {/* Синим — только то, что сейчас живое в проде; прошлые прод-деплои — нейтрально. */}
+      {env === "production" && current ? (
+        <span
+          className="hidden w-fit shrink-0 items-center gap-1.5 rounded-full bg-blue-500 py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-white sm:inline-flex"
+          title="Currently live in production"
+        >
           <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white">
             <HugeiconsIcon icon={ArrowUp02Icon} className="h-2.5 w-2.5 text-blue-500" />
           </span>
+          Production
+        </span>
+      ) : env === "production" ? (
+        <span className="hidden w-fit shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground sm:inline-flex">
           Production
         </span>
       ) : (
