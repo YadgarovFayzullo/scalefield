@@ -51,3 +51,28 @@ export function DisconnectInstallation({ id, login }: { id: string; login: strin
     </Button>
   );
 }
+
+export function ShareInstallation({ sourceId, orgId, login }: { sourceId: string; orgId: string; login: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await api("/api/github/installations/share", { method: "POST", body: JSON.stringify({ sourceId, orgId }) });
+          router.refresh();
+        } catch (e) {
+          alert(e instanceof Error ? e.message : String(e));
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      Use @{login} here
+    </Button>
+  );
+}

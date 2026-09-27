@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import type { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/db";
@@ -66,10 +66,17 @@ export async function getSessionUser(token: string | undefined): Promise<Session
     .limit(1);
   const row = rows[0];
   if (!row) return null;
+  // Порядок важен: primaryOrgId берёт первую команду с правами — сначала те,
+  // где есть проекты, потом по дате вступления. Иначе пустая личная команда
+  // перехватывала бы установки GitHub, серверы и импорт у рабочей.
   const memberships = await db
     .select({ orgId: schema.memberships.orgId, role: schema.memberships.role })
     .from(schema.memberships)
-    .where(eq(schema.memberships.userId, row.user.id));
+    .where(eq(schema.memberships.userId, row.user.id))
+    .orderBy(
+      sql`(select count(*) from ${schema.projects} where ${schema.projects.orgId} = ${schema.memberships.orgId}) desc`,
+      asc(schema.memberships.createdAt),
+    );
   if (Date.now() - row.session.lastSeenAt.getTime() > TOUCH_EVERY_MS) {
     void db.update(schema.sessions).set({ lastSeenAt: new Date() }).where(eq(schema.sessions.id, row.session.id)).catch(() => {});
   }

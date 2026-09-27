@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { PanelHeader } from "@/components/panel-header";
-import { CreateGithubApp, DisconnectInstallation } from "@/components/dashboard/github-settings";
-import { currentUser, primaryOrgId } from "@/lib/auth";
+import { CreateGithubApp, DisconnectInstallation, ShareInstallation } from "@/components/dashboard/github-settings";
+import { inArray } from "drizzle-orm";
+import { db, schema } from "@/db";
+import { currentUser } from "@/lib/auth";
 import { appUrl, getGithubApp, listInstallations, syncAppInfo } from "@/lib/github-app";
 
 export const dynamic = "force-dynamic";
@@ -31,9 +33,13 @@ export default async function GithubSettingsPage({ searchParams }: { searchParam
   const [stored, installs] = await Promise.all([getGithubApp(), listInstallations(user.orgIds)]);
   // Переименование на GitHub меняет slug — подтягиваем актуальный.
   const app = stored ? await syncAppInfo(stored) : null;
-  const orgId = primaryOrgId(user);
-  const role = user.memberships.find((m) => m.orgId === orgId)?.role;
-  const canManage = role === "owner" || role === "admin";
+  const orgRows = user.orgIds.length
+    ? await db.select({ id: schema.organizations.id, name: schema.organizations.name }).from(schema.organizations).where(inArray(schema.organizations.id, user.orgIds))
+    : [];
+  // Команды в порядке memberships (рабочая — с проектами — первой).
+  const teams = user.memberships
+    .map((m) => ({ id: m.orgId, name: orgRows.find((o) => o.id === m.orgId)?.name ?? "Team", canManage: m.role === "owner" || m.role === "admin" }))
+    .filter((t, i, all) => all.findIndex((x) => x.id === t.id) === i);
 
   const notice = sp.error
     ? { tone: "bad", text: sp.error }
@@ -108,41 +114,57 @@ export default async function GithubSettingsPage({ searchParams }: { searchParam
           )}
         </Section>
 
-        <Section
-          title="Repositories"
-          description="GitHub accounts and organizations whose repositories this team can deploy. Private repos, Actions runs and push-to-deploy work through them."
-        >
-          {installs.length > 0 && (
-            <ul className="mb-4 divide-y divide-border rounded-lg border border-border">
-              {installs.map((i) => (
-                <li key={i.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    {i.accountAvatarUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={i.accountAvatarUrl} alt="" className="h-7 w-7 rounded-full" />
-                    ) : (
-                      <div className="h-7 w-7 rounded-full bg-muted" />
-                    )}
-                    <div>
-                      <p className="text-sm font-medium">@{i.accountLogin}</p>
-                      <p className="text-xs text-muted-foreground">{i.accountType === "Organization" ? "Organization" : "Personal account"}</p>
-                    </div>
-                  </div>
-                  {canManage && <DisconnectInstallation id={i.id} login={i.accountLogin} />}
-                </li>
-              ))}
-            </ul>
-          )}
-          {!app ? (
-            <p className="text-sm text-muted-foreground">Available once the GitHub App is created.</p>
-          ) : canManage && orgId ? (
-            <a href={`/api/auth/github/start?mode=install&org=${orgId}`} className={linkBtn}>
-              {installs.length ? "Add or configure GitHub account" : "Install GitHub App"}
-            </a>
-          ) : (
-            <p className="text-sm text-muted-foreground">Only team owners and admins can connect GitHub.</p>
-          )}
-        </Section>
+        {teams.map((team) => {
+          const own = installs.filter((i) => i.orgId === team.id);
+          const ownIds = new Set(own.map((i) => i.installationId));
+          // Установки, которые вы подключили в других своих командах, — можно взять и сюда.
+          const reusable = installs.filter((i) => i.orgId !== team.id && i.addedBy === user.id && !ownIds.has(i.installationId));
+          const seen = new Set<string>();
+          const reuse = reusable.filter((i) => (seen.has(i.installationId) ? false : (seen.add(i.installationId), true)));
+          return (
+            <Section
+              key={team.id}
+              title={teams.length > 1 ? `Repositories · ${team.name}` : "Repositories"}
+              description="GitHub accounts and organizations whose repositories this team can deploy. Private repos, Actions runs and push-to-deploy work through them."
+            >
+              {own.length > 0 && (
+                <ul className="mb-4 divide-y divide-border rounded-lg border border-border">
+                  {own.map((i) => (
+                    <li key={i.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        {i.accountAvatarUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={i.accountAvatarUrl} alt="" className="h-7 w-7 rounded-full" />
+                        ) : (
+                          <div className="h-7 w-7 rounded-full bg-muted" />
+                        )}
+                        <div>
+                          <p className="text-sm font-medium">@{i.accountLogin}</p>
+                          <p className="text-xs text-muted-foreground">{i.accountType === "Organization" ? "Organization" : "Personal account"}</p>
+                        </div>
+                      </div>
+                      {team.canManage && <DisconnectInstallation id={i.id} login={i.accountLogin} />}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!app ? (
+                <p className="text-sm text-muted-foreground">Available once the GitHub App is created.</p>
+              ) : team.canManage ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <a href={`/api/auth/github/start?mode=install&org=${team.id}`} className={linkBtn}>
+                    {own.length ? "Add or configure GitHub account" : "Install GitHub App"}
+                  </a>
+                  {reuse.map((i) => (
+                    <ShareInstallation key={i.id} sourceId={i.id} orgId={team.id} login={i.accountLogin} />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Only team owners and admins can connect GitHub.</p>
+              )}
+            </Section>
+          );
+        })}
       </main>
     </div>
   );
