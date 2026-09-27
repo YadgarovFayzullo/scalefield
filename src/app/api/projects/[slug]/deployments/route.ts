@@ -4,6 +4,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getProject, projectRepos } from "@/lib/projects";
 import { deploymentToItem, syncDeployment } from "@/lib/services";
+import { tokenForRepo } from "@/lib/github-app";
 import type { Deployment, DeploymentsData } from "@/lib/status";
 
 export const runtime = "nodejs";
@@ -13,10 +14,10 @@ export const dynamic = "force-dynamic";
  * Деплои проекта. Источник сегодня — прогоны GitHub Actions по репозиториям
  * сервисов проекта; они синхронизируются в таблицу `deployments`, и ответ
  * собирается из неё — так история переживает рестарты и не зависит от лимита
- * GitHub API (5000 запросов в час на токен). Синк не чаще раза в 30 с на
+ * GitHub API (5000 запросов в час на токен). Токен — установки GitHub App команды
+ * проекта (`tokenForRepo`), иначе переходный GITHUB_TOKEN. Синк не чаще раза в 30 с на
  * проект. Когда появится собственный билдер, он будет писать в ту же таблицу.
  */
-const TOKEN = process.env.GITHUB_TOKEN || "";
 const SYNC_MS = 30_000;
 // Момент и ошибки последнего синка по проекту: ошибки показываем и между
 // синками, иначе «репозиторий недоступен» мелькал бы раз в 30 с.
@@ -38,16 +39,20 @@ type Run = {
   event: string;
 };
 
-async function fetchRuns(repo: string): Promise<Run[]> {
+async function fetchRuns(repo: string, token: string | null): Promise<Run[]> {
   const res = await fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=25`, {
     headers: {
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
-      ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     cache: "no-store",
     signal: AbortSignal.timeout(15000),
   });
+  if (res.status === 404 || res.status === 401) {
+    // Приватный репозиторий без установки приложения GitHub для этой команды.
+    throw new Error(`${repo}: no access — connect this GitHub account in Settings → GitHub`);
+  }
   if (!res.ok) throw new Error(`${repo}: GitHub API ${res.status}`);
   const json = (await res.json()) as { workflow_runs: Run[] };
   return json.workflow_runs;
@@ -55,9 +60,10 @@ async function fetchRuns(repo: string): Promise<Run[]> {
 
 async function syncProject(projectId: string): Promise<string[]> {
   const repos = await projectRepos(projectId);
+  const [proj] = await db.select({ orgId: schema.projects.orgId }).from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1);
   const results = await Promise.allSettled(
     repos.map(async ({ repo, serviceId }) => {
-      const runs = await fetchRuns(repo);
+      const runs = await fetchRuns(repo, proj ? await tokenForRepo(proj.orgId, repo) : null);
       if (runs.length === 0) return;
       const rows = runs.map((r) => {
         const started = new Date(r.run_started_at || r.created_at);

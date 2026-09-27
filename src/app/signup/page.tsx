@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { GithubButton } from "@/components/github-button";
 
 type InviteInfo = { email: string | null; orgName: string | null };
 
@@ -20,7 +21,7 @@ function SignupForm() {
   const [name, setName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
-  const [error, setError] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(params.get("error"));
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
@@ -77,6 +78,7 @@ function SignupForm() {
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <GithubButton query={`mode=signup&invite=${encodeURIComponent(token)}`} label="Sign up with GitHub" />
       {info.orgName && (
         <p className="rounded-md bg-muted px-3 py-2 text-sm">
           You&apos;re joining <span className="font-medium">{info.orgName}</span>.

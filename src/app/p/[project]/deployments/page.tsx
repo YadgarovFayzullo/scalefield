@@ -208,8 +208,9 @@ export default function DeploymentsPage() {
           <div className="mx-6 mt-2 rounded-lg border border-border p-4 text-sm">
             <p className="mb-1 font-medium">No deployments yet</p>
             <p className="text-muted-foreground">
-              Deploy a service from the Services tab, or set <code className="font-mono">GITHUB_TOKEN</code> so this
-              project&apos;s repos show their GitHub Actions runs here.
+              Deploy a service from the Services tab, or connect GitHub in{" "}
+              <a href="/settings/github" className="underline underline-offset-4">Settings → GitHub</a> so this project&apos;s repos show their
+              GitHub Actions runs here.
             </p>
           </div>
         ) : filtered.length === 0 ? (

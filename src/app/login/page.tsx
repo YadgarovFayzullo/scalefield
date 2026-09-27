@@ -7,14 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { GithubButton } from "@/components/github-button";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
-  const [error, setError] = React.useState<string | null>(null);
+  // Ошибка возврата с GitHub (?error=…) — показываем там же, где ошибку пароля.
+  const [error, setError] = React.useState<string | null>(params.get("error"));
   const [busy, setBusy] = React.useState(false);
+  const next = params.get("next");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -32,7 +35,6 @@ function LoginForm() {
         return;
       }
       // Только свой путь: `next` из адреса — не открытый редирект.
-      const next = params.get("next");
       router.replace(next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard");
       router.refresh();
     } catch (err) {
@@ -44,6 +46,7 @@ function LoginForm() {
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <GithubButton query={`mode=login${next ? `&next=${encodeURIComponent(next)}` : ""}`} />
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input id="email" type="email" autoComplete="email" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} required />

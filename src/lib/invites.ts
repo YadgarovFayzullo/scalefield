@@ -132,12 +132,33 @@ async function freeOrgSlug(base: string): Promise<string> {
 
 /** Регистрация: пользователь + команда (своя или из приглашения); приглашение гасится в той же транзакции. */
 export async function acceptInvite(input: { token: string; name: string; email: string; password: string }): Promise<string> {
+  const problem = passwordProblem(input.password);
+  if (problem) throw new InviteError(problem);
+  return registerFromInvite({ token: input.token, name: input.name, email: input.email, passwordHash: await hashPassword(input.password), github: null });
+}
+
+/** Регистрация по приглашению через GitHub: email — подтверждённый основной адрес GitHub, пароля нет. */
+export async function acceptInviteWithGithub(
+  token: string,
+  gh: { id: string; login: string; name: string | null; avatarUrl: string | null; email: string | null },
+): Promise<string> {
+  if (!gh.email) throw new InviteError("Your GitHub account has no verified primary email — add one on GitHub or sign up with email");
+  const linked = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.githubId, gh.id)).limit(1);
+  if (linked.length) throw new InviteError("This GitHub account is already linked to a Scalefield user — sign in instead", 409);
+  return registerFromInvite({ token, name: gh.name || gh.login, email: gh.email, passwordHash: null, github: gh });
+}
+
+async function registerFromInvite(input: {
+  token: string;
+  name: string;
+  email: string;
+  passwordHash: string | null;
+  github: { id: string; login: string; avatarUrl: string | null } | null;
+}): Promise<string> {
   const name = input.name.trim().slice(0, 100);
   const email = input.email.trim().toLowerCase();
   if (!name) throw new InviteError("Name is required");
   if (!EMAIL_RE.test(email)) throw new InviteError("Email is invalid");
-  const problem = passwordProblem(input.password);
-  if (problem) throw new InviteError(problem);
 
   const inv = await findUsable(input.token);
   if (!inv) throw new InviteError("This invite is invalid, expired or already used", 410);
@@ -145,7 +166,6 @@ export async function acceptInvite(input: { token: string; name: string; email: 
   const taken = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, email)).limit(1);
   if (taken.length) throw new InviteError("A user with this email already exists — sign in instead", 409);
 
-  const passwordHash = await hashPassword(input.password);
   const orgSlug = inv.orgId ? null : await freeOrgSlug(slugify(name));
   return db.transaction(async (tx) => {
     // Гасим приглашение первым: параллельная вторая регистрация по той же
@@ -156,7 +176,17 @@ export async function acceptInvite(input: { token: string; name: string; email: 
       .where(and(eq(schema.invites.id, inv.id), isNull(schema.invites.usedAt)))
       .returning({ id: schema.invites.id });
     if (!claimed.length) throw new InviteError("This invite was just used", 410);
-    const [user] = await tx.insert(schema.users).values({ email, name, passwordHash }).returning();
+    const [user] = await tx
+      .insert(schema.users)
+      .values({
+        email,
+        name,
+        passwordHash: input.passwordHash,
+        githubId: input.github?.id ?? null,
+        githubLogin: input.github?.login ?? null,
+        avatarUrl: input.github?.avatarUrl ?? null,
+      })
+      .returning();
     let orgId = inv.orgId;
     if (!orgId) {
       const [org] = await tx.insert(schema.organizations).values({ slug: orgSlug!, name: `${name}'s team` }).returning();

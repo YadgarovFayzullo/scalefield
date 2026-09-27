@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { decryptSecret, encryptSecret } from "@/lib/secrets";
 import { agentRequest } from "@/lib/agent";
+import { tokenForRepo } from "@/lib/github-app";
 import { getProjectAgent } from "@/lib/projects";
 import type { DeploymentRow, Domain, Service } from "@/db/schema";
 
@@ -326,7 +327,9 @@ export async function buildService(
   const ref = (opts.ref || service.branch || "main").trim();
   const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15).toLowerCase();
   const image = `${projectSlug}/${service.name}:${ref.replace(/[^a-z0-9._-]/gi, "-").toLowerCase()}-${stamp}`;
-  const token = process.env.GITHUB_TOKEN;
+  const [proj] = await db.select({ orgId: schema.projects.orgId }).from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1);
+  // Токен установки GitHub App команды (или переходный GITHUB_TOKEN).
+  const token = proj ? await tokenForRepo(proj.orgId, service.repo) : null;
   let repoUrl = service.repo.includes("://") ? service.repo : `https://github.com/${service.repo}.git`;
   // Приватные репозитории GitHub: токен в URL, агент его в лог не пишет.
   if (token && /^https:\/\/github\.com\//.test(repoUrl)) repoUrl = repoUrl.replace("https://github.com/", `https://x-access-token:${token}@github.com/`);

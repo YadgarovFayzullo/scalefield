@@ -75,6 +75,42 @@ export const sessions = pgTable(
   (t) => [index("sessions_user").on(t.userId)],
 );
 
+// GitHub App платформы (одна строка): создаётся владельцем по манифесту из
+// /settings/github. Через неё — вход «Continue with GitHub» (client id/secret)
+// и доступ к репозиториям команд (JWT приложения → токены установок). Секреты
+// шифруются secrets.ts, как токены агентов.
+export const githubApps = pgTable("github_apps", {
+  id: id(),
+  appId: text("app_id").notNull().unique(),
+  slug: text("slug").notNull(),
+  name: text("name").notNull(),
+  ownerLogin: text("owner_login"),
+  htmlUrl: text("html_url"),
+  clientId: text("client_id").notNull(),
+  clientSecretEnc: text("client_secret_enc").notNull(),
+  privateKeyEnc: text("private_key_enc").notNull(),
+  webhookSecretEnc: text("webhook_secret_enc"),
+  createdAt: createdAt(),
+});
+
+// Установки GitHub App, привязанные к команде: аккаунт/организация GitHub,
+// чьи репозитории команда может деплоить. Привязка — только после проверки
+// через токен пользователя, что установка ему действительно доступна.
+export const githubInstallations = pgTable(
+  "github_installations",
+  {
+    id: id(),
+    installationId: text("installation_id").notNull(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    accountLogin: text("account_login").notNull(),
+    accountType: text("account_type"), // User | Organization
+    accountAvatarUrl: text("account_avatar_url"),
+    addedBy: uuid("added_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("github_installations_org_install").on(t.orgId, t.installationId)],
+);
+
 // Приглашения: регистрация закрыта, пока продукт сырой. Ссылка
 // /signup?invite=<токен>, в базе — хеш токена. `email` задан — только на этот
 // адрес; `org_id` задан — в эту команду с ролью `role`, иначе новая своя.

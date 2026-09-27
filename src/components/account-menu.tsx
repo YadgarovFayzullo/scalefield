@@ -54,6 +54,7 @@ export function AccountMenu({ account }: { account: AccountInfo }) {
           </div>
           <MenuLink href="/dashboard">Projects</MenuLink>
           <MenuLink href="/servers">Servers</MenuLink>
+          <MenuLink href="/settings/github">GitHub</MenuLink>
           {account.isPlatformAdmin && <MenuLink href="/settings/invites">Invites</MenuLink>}
           <button type="button" onClick={logout} className="w-full rounded-md px-3 py-1.5 text-left text-muted-foreground hover:bg-muted hover:text-foreground">
             Log out
