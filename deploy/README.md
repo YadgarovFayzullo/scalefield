@@ -5,8 +5,9 @@
 - **control-plane** (`docker-compose.yml` в этом каталоге): `web` — панель +
   API, `relay` — точка, к которой подключаются агенты, и пока control-plane
   стоит на том же сервере, что и researcher.uz, — его агент `status-api`.
-  Каталог на сервере — `/opt/apps/status`, домены `status.researcher.uz` и
-  `relay.researcher.uz` через общий Traefik.
+  Каталог на сервере — `/opt/apps/status`, домены `scalefield.uz` (+ `www`,
+  алиас `status.researcher.uz`) и `relay.scalefield.uz` (алиас
+  `relay.researcher.uz`) через общий Traefik.
 - **агент клиента**: единственное, что стоит на сервере проекта. Держит
   исходящий WebSocket к relay, входящих портов нет. Ставится из панели
   («Servers → Add server»): control-plane заходит по SSH и кладёт стек в
@@ -65,7 +66,7 @@ Traefik должен писать JSON access-log в `/var/log/traefik/access.lo
 ставит Docker/Traefik/агента и показывает лог; после установки на сервере
 лежит SSH-ключ организации, им делается «Reinstall agent». Нужны переменные
 control-plane: `RELAY_PUBLIC_URL` (адрес relay глазами клиента,
-`wss://…/agent`), `AGENT_IMAGE` (образ агента в реестре), `ACME_EMAIL`.
+`wss://relay.scalefield.uz/agent`), `AGENT_IMAGE` (образ агента в реестре), `ACME_EMAIL`.
 
 Токен агента генерируется при добавлении и хранится в
 `servers.agent_token_enc`; relay ищет сервер по его sha256

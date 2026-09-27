@@ -331,6 +331,8 @@ Vercel и Supabase, проект не должен видеть чужие ре�
 4. ~~Первый внешний клиент.~~ Решено 27.09.2026: researcher.uz и qrtifact.uz —
    первые два сервера на новой архитектуре; они же полигон для «Добавить
    сервер».
-5. Домен relay и панели: сейчас в compose `relay.researcher.uz` /
-   `status.researcher.uz` как заглушки; для продукта нужен свой домен
-   (`*.scalefield.app`-подобный, wildcard в Cloudflare под адреса проектов).
+5. ~~Домен продукта.~~ Решено 27.09.2026: `scalefield.uz` (зона в Cloudflare,
+   серое облако). Панель — `scalefield.uz` (+ `www`), relay —
+   `relay.scalefield.uz`; `status.researcher.uz` / `relay.researcher.uz`
+   оставлены алиасами. Открыто: wildcard `*.scalefield.uz` под адреса
+   проектов (`<project>.scalefield.uz`), как у Vercel.

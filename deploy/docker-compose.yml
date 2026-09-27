@@ -51,7 +51,8 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=edge
-      - traefik.http.routers.relay.rule=Host(`${RELAY_HOST:-relay.researcher.uz}`)
+      # relay.researcher.uz — прежний адрес, оставлен алиасом.
+      - traefik.http.routers.relay.rule=Host(`relay.scalefield.uz`) || Host(`relay.researcher.uz`)
       - traefik.http.routers.relay.entrypoints=websecure
       - traefik.http.routers.relay.tls.certresolver=le
       - traefik.http.services.relay.loadbalancer.server.port=3003
@@ -74,7 +75,8 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=edge
-      - traefik.http.routers.status.rule=Host(`status.researcher.uz`)
+      # Основной адрес — scalefield.uz; status.researcher.uz оставлен алиасом.
+      - traefik.http.routers.status.rule=Host(`scalefield.uz`) || Host(`www.scalefield.uz`) || Host(`status.researcher.uz`)
       - traefik.http.routers.status.entrypoints=websecure
       - traefik.http.routers.status.tls.certresolver=le
       - traefik.http.services.status.loadbalancer.server.port=3000
