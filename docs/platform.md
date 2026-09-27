@@ -249,9 +249,24 @@ Scalefield стартует как «панель для своего VPS» (м�
   (dev гоняет его в Node и ошибку не показывает; `runtime: "nodejs"` не
   принимается), поэтому в proxy только проверка наличия cookie, база — в
   ручках; проверять `next build`, не dev.
-- [ ] Вход через GitHub + GitHub App (шаг 2): приложение создаётся по
-  манифесту из панели, репозитории подключаются установкой приложения,
-  деплои и сборки — на токенах установки вместо `GITHUB_TOKEN`.
+- [x] GitHub App (27.09, в проде; само приложение создаёт владелец кнопкой в
+  Settings → GitHub): манифест (`src/lib/github-app.ts` → `manifestFor`,
+  права metadata/contents/actions/email_addresses: read, события push и
+  workflow_run, `request_oauth_on_install`) → ключи в `github_apps`
+  шифрованно. Вход «Continue with GitHub» и регистрация по приглашению через
+  GitHub; существующий аккаунт с тем же ПОДТВЕРЖДЁННЫМ email привязывается.
+  Установки (`github_installations`) привязываются к команде только после
+  проверки токеном пользователя (`/user/installations`) — чужой
+  `installation_id` не подсунуть. `tokenForRepo(orgId, repo)` — токен
+  установки на владельца репозитория (JWT RS256 на `node:crypto`, кэш токена
+  до 5 мин до истечения), иначе переходный `GITHUB_TOKEN`; им пользуются синк
+  Actions и клонирование при сборке. Единый webhook `/api/github/webhook`
+  (push → автодеплой в командах с этой установкой; installation deleted →
+  отвязка) — старый webhook на сервис (`/api/hooks/github/<id>`) остаётся.
+  `state` всех редиректов — HMAC + nonce-cookie (`src/lib/oauth-state.ts`).
+  Грабли: `server-only` — алиас Next, в голом Node (tsx-скрипты) его нет —
+  подкладывать заглушку через NODE_PATH; `APP_URL` обязателен на проде
+  (адреса манифеста и OAuth redirect_uri).
 - [ ] Переключатель команд, приглашение в команду владельцем команды (не
   только владельцем платформы), смена email/пароля, сброс пароля по почте.
 - Регистрация, организации, роли, API-токены, аудит действий, лимиты и биллинг.
