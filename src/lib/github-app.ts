@@ -239,11 +239,43 @@ export async function verifyWebhook(raw: string, signature: string | null): Prom
 
 // ---------- установки и репозитории команды ----------
 
-/** Привязать к команде установки, доступные пользователю GitHub (проверка — его токеном). */
+async function repoCount(url: string, token: string): Promise<number> {
+  const res = await fetch(url, { headers: { ...HEADERS, Authorization: `Bearer ${token}` }, cache: "no-store" });
+  if (!res.ok) throw new Error(`GitHub ${res.status}`);
+  return ((await res.json()) as { total_count: number }).total_count;
+}
+
+/**
+ * Видит ли пользователь ВСЕ репозитории установки. /user/installations отдаёт
+ * установку любому, у кого есть доступ хотя бы к одному её репозиторию, —
+ * например, коллаборатору одного репозитория в чужом личном аккаунте. А
+ * список импорта и деплой идут токеном установки, который видит всё, что ей
+ * открыто. Привязывать такую установку к команде коллаборатора значит
+ * показать ему чужие приватные репозитории (так и случилось на проде 28.09).
+ */
+async function userSeesWholeInstallation(userToken: string, installationId: string): Promise<boolean> {
+  const [mine, all] = await Promise.all([
+    repoCount(`${API}/user/installations/${installationId}/repositories?per_page=1`, userToken),
+    installationToken(installationId).then((t) => repoCount(`${API}/installation/repositories?per_page=1`, t)),
+  ]);
+  return mine >= all;
+}
+
+/**
+ * Привязать к команде установки, доступные пользователю GitHub (проверка — его
+ * токеном): только те, чьи репозитории он видит на GitHub целиком.
+ */
 export async function linkUserInstallations(orgId: string, userId: string, userToken: string, onlyId: string | null = null): Promise<number> {
   const available = await userInstallations(userToken);
-  const chosen = onlyId ? available.filter((i) => i.id === onlyId) : available;
-  if (onlyId && chosen.length === 0) throw new Error("GitHub does not confirm you have access to this installation");
+  const candidates = onlyId ? available.filter((i) => i.id === onlyId) : available;
+  if (onlyId && candidates.length === 0) throw new Error("GitHub does not confirm you have access to this installation");
+  const chosen: UserInstallation[] = [];
+  for (const i of candidates) {
+    if (await userSeesWholeInstallation(userToken, i.id).catch(() => false)) chosen.push(i);
+  }
+  if (onlyId && chosen.length === 0) {
+    throw new Error(`You only have access to some repositories of @${candidates[0].login} — ask its owner to install the GitHub App for your team`);
+  }
   for (const i of chosen) {
     await db
       .insert(schema.githubInstallations)
