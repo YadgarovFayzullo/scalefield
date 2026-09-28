@@ -101,7 +101,7 @@ export function AddServerSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-full flex-col sm:max-w-lg">
+      <SheetContent className="flex flex-col data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
         <form onSubmit={submit} className="flex h-full flex-col">
           <SheetHeader>
             <SheetTitle>Add server</SheetTitle>

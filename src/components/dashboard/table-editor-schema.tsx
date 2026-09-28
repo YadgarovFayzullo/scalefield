@@ -81,7 +81,7 @@ export function SchemaSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-full flex-col sm:max-w-xl">
+      <SheetContent className="flex flex-col data-[side=right]:w-full data-[side=right]:sm:max-w-3xl">
         <SheetHeader>
           <SheetTitle className="font-mono">
             {table.schema}.{table.name}

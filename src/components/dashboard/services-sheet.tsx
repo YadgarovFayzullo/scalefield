@@ -108,7 +108,7 @@ export function ServiceSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-full flex-col sm:max-w-lg">
+      <SheetContent className="flex flex-col data-[side=right]:w-full data-[side=right]:sm:max-w-3xl">
         <SheetHeader>
           <SheetTitle>{service ? `Edit ${service.name}` : "New service"}</SheetTitle>
           <SheetDescription>A service is one container. Deploy pulls the image and starts it on the project server.</SheetDescription>
@@ -149,6 +149,9 @@ export function ServiceSheet({
               {field("Dockerfile", <Input className="h-8 font-mono text-xs" value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} placeholder="Dockerfile" />)}
               {field("Context", <Input className="h-8 font-mono text-xs" value={context} onChange={(e) => setContext(e.target.value)} placeholder="." />)}
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              Built with the Dockerfile if the repository has one; otherwise Railpack detects the stack (Node/Next.js, Python, Go, PHP, static…) and the app gets $PORT.
+            </p>
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" checked={autoDeploy} onChange={(e) => setAutoDeploy(e.target.checked)} />
               Auto-deploy on push to the branch (needs the webhook below)

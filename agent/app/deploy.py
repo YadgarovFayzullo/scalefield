@@ -18,17 +18,22 @@ frontend, status), и владелец умеет их чинить руками
 """
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 import shutil
 from pathlib import Path
 
 import yaml
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.jobs import Job, LogFn, run_streaming
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 COMPOSE_TIMEOUT_S = 600
 BUILD_TIMEOUT_S = 1800
 
@@ -60,6 +65,9 @@ class BuildSpec(BaseModel):
     # (см. researcher-uz .github/workflows/ci.yml), но механизм общий для
     # любого стека, который сам читает .env.production при сборке.
     build_env: dict[str, str] = Field(default_factory=dict)
+    # auto — Dockerfile, если он есть в репозитории, иначе Railpack сам
+    # определяет стек (Node/Next, Python, Go, PHP, статика…), как у Vercel.
+    builder: Literal["auto", "dockerfile", "railpack"] = "auto"
     deploy: DeploySpec
 
 
@@ -234,21 +242,33 @@ async def build_and_deploy(spec: BuildSpec, log: LogFn) -> dict:
     dockerfile = (context / spec.dockerfile).resolve() if not spec.dockerfile.startswith("/") else Path(spec.dockerfile)
     if not str(context).startswith(str(workdir.resolve())) or not str(dockerfile).startswith(str(workdir.resolve())):
         raise DeployError("dockerfile/context must be inside the repository")
-    if not dockerfile.exists():
+    use_railpack = spec.builder == "railpack" or (spec.builder == "auto" and not dockerfile.exists())
+    if not use_railpack and not dockerfile.exists():
         log(f"ERROR: {spec.dockerfile} not found in {spec.context}")
         return {"ok": False, "stage": "build", "sha": sha}
 
-    if spec.build_env:
+    # Railpack получает build env секретами на время сборки; файл в
+    # контексте он скопировал бы в итоговый образ вместе с исходниками.
+    if spec.build_env and not use_railpack:
         env_path = workdir / ".env.production"
         env_path.write_text("".join(f"{k}={v}\n" for k, v in spec.build_env.items()))
         log(f"wrote {len(spec.build_env)} var(s) to .env.production")
 
-    cmd = ["docker", "build", "-f", str(dockerfile), "-t", d.image]
-    for k, v in spec.build_args.items():
-        cmd += ["--build-arg", f"{k}={v}"]
-    cmd.append(str(context))
-    log(f"$ docker build -f {spec.dockerfile} -t {d.image} {spec.context}")
-    code = await run_streaming(cmd, context, log, BUILD_TIMEOUT_S, env={"DOCKER_BUILDKIT": "1"})
+    if use_railpack:
+        if spec.builder == "auto":
+            log(f"no {spec.dockerfile} in {spec.context} — detecting the stack with Railpack")
+        code = await _railpack_build(spec, workdir, context, log)
+        # Приложения без Dockerfile слушают $PORT (конвенция Railway/Heroku,
+        # `next start` и большинство фреймворков её понимают).
+        if d.port and "PORT" not in d.env:
+            d = d.model_copy(update={"env": {**d.env, "PORT": str(d.port)}})
+    else:
+        cmd = ["docker", "build", "-f", str(dockerfile), "-t", d.image]
+        for k, v in spec.build_args.items():
+            cmd += ["--build-arg", f"{k}={v}"]
+        cmd.append(str(context))
+        log(f"$ docker build -f {spec.dockerfile} -t {d.image} {spec.context}")
+        code = await run_streaming(cmd, context, log, BUILD_TIMEOUT_S, env={"DOCKER_BUILDKIT": "1"})
     if code != 0:
         return {"ok": False, "stage": "build", "sha": sha}
 
@@ -256,6 +276,66 @@ async def build_and_deploy(spec: BuildSpec, log: LogFn) -> dict:
     result["sha"] = sha
     result["stage"] = "deploy"
     return result
+
+
+async def _railpack_build(spec: BuildSpec, workdir: Path, context: Path, log: LogFn) -> int:
+    """Сборка без Dockerfile по схеме «Running Railpack in Production»:
+    `railpack prepare` пишет план, `docker buildx` собирает его фронтендом той
+    же версии. Build env уходит секретами BuildKit (в образ не попадает), имена
+    — в `prepare --env`, значения — файлами `--secret id=…,src=…`: через
+    окружение процесса нельзя, пользовательский PATH сломал бы сам docker."""
+    if shutil.which("railpack") is None:
+        log("ERROR: this server's agent has no Railpack — add a Dockerfile to the repository or reinstall the agent")
+        return 127
+    d = spec.deploy
+    for k in spec.build_env:
+        if not ENV_KEY_RE.match(k):
+            raise DeployError(f"invalid build env name: {k}")
+    base = workdir.parent
+    plan = base / f"{d.service}.railpack-plan.json"
+    info = base / f"{d.service}.railpack-info.json"
+    secrets_dir = base / f"{d.service}.secrets"
+    env_args: list[str] = []
+    for k, v in spec.build_env.items():
+        env_args += ["--env", f"{k}={v}"]
+    prepare = ["railpack", "prepare", str(context), "--plan-out", str(plan), "--info-out", str(info), *env_args]
+    names = " ".join(f"--env {k}=***" for k in spec.build_env)
+    log(f"$ railpack prepare {spec.context} {names}".rstrip())
+    code = await run_streaming(prepare, context, log, 600)
+    if code == 75:  # временный сбой (сеть при загрузке mise) — один повтор
+        log("railpack prepare: transient failure, retrying")
+        code = await run_streaming(prepare, context, log, 600)
+    if code != 0:
+        log("ERROR: Railpack could not detect how to build this repository — add a Dockerfile, or a start script (e.g. \"start\" in package.json)")
+        return code
+
+    version = os.environ.get("RAILPACK_VERSION", "")
+    frontend = "ghcr.io/railwayapp/railpack-frontend" + (f":v{version}" if version else "")
+    secrets_hash = hashlib.sha256("".join(f"{k}={v}\n" for k, v in sorted(spec.build_env.items())).encode()).hexdigest()
+    cmd = [
+        "docker", "buildx", "build",
+        "--build-arg", f"BUILDKIT_SYNTAX={frontend}",
+        "--build-arg", f"secrets-hash={secrets_hash}",
+        # Кэш монтирований (npm, pip…) отдельный на сервис — проекты на одном
+        # сервере не делят и не отравляют его друг другу.
+        "--build-arg", f"cache-key={d.project}-{d.service}",
+        "-f", str(plan),
+        "-t", d.image,
+        "--load",
+    ]
+    try:
+        if spec.build_env:
+            secrets_dir.mkdir(mode=0o700, exist_ok=True)
+            for k, v in spec.build_env.items():
+                f = secrets_dir / k
+                f.write_text(v)
+                f.chmod(0o600)
+                cmd += ["--secret", f"id={k},src={f}"]
+        cmd.append(str(context))
+        log(f"$ docker buildx build (railpack {version or 'latest'}) -t {d.image} {spec.context}")
+        return await run_streaming(cmd, context, log, BUILD_TIMEOUT_S, env={"DOCKER_BUILDKIT": "1"})
+    finally:
+        shutil.rmtree(secrets_dir, ignore_errors=True)
 
 
 async def remove(spec: RemoveSpec) -> dict:

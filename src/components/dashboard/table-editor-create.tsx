@@ -60,7 +60,7 @@ export function CreateTableSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-full flex-col sm:max-w-xl">
+      <SheetContent className="flex flex-col data-[side=right]:w-full data-[side=right]:sm:max-w-3xl">
         <SheetHeader>
           <SheetTitle>New table</SheetTitle>
           <SheetDescription>Schema {schema}. Empty column names are skipped.</SheetDescription>

@@ -341,6 +341,8 @@ export async function buildService(
       dockerfile: service.dockerfile || "Dockerfile",
       context: service.buildContext || ".",
       build_env: service.buildEnv,
+      // Dockerfile, если он есть в репозитории, иначе агент собирает Railpack'ом.
+      builder: "auto",
       deploy: deploySpec(projectSlug, service, image),
     },
   });

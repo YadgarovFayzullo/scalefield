@@ -65,7 +65,7 @@ export function InsertRowSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-full flex-col sm:max-w-md">
+      <SheetContent className="flex flex-col data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
         <SheetHeader>
           <SheetTitle>Insert row</SheetTitle>
           <SheetDescription>Leave a field empty to use the column default.</SheetDescription>

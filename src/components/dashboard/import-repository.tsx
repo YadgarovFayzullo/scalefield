@@ -136,7 +136,7 @@ function ConfigureProject({
     try {
       const res = await api<{ project: { slug: string }; deployError: string | null }>("/api/projects", {
         method: "POST",
-        body: JSON.stringify({ name, repo: repo.fullName, branch, serverId: serverId || null, dockerfile, port: Number(port) || null, domain, env: parseEnvText(env) }),
+        body: JSON.stringify({ name, repo: repo.fullName, branch, serverId: serverId || null, dockerfile: dockerfile.trim() || "Dockerfile", port: Number(port) || null, domain, env: parseEnvText(env) }),
       });
       if (res.deployError) alert(`Project created, but the first build did not start: ${res.deployError}`);
       onDone(res.project.slug);
@@ -181,7 +181,7 @@ function ConfigureProject({
       )}
       <div className="grid gap-4 sm:grid-cols-3">
         {field("Branch", "Pushes here redeploy.", <Input value={branch} onChange={(e) => setBranch(e.target.value)} required />)}
-        {field("Dockerfile", "Path in the repo — the build is docker build.", <Input value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} required />)}
+        {field("Dockerfile", "Optional — without it the stack is detected automatically.", <Input value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} placeholder="Dockerfile" />)}
         {field("Port", "The app listens on.", <Input value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" />)}
       </div>
       {field(
