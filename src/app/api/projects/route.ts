@@ -16,6 +16,7 @@ type ImportBody = {
   port?: number | null;
   dockerfile?: string;
   domain?: string;
+  env?: Record<string, string>;
   deploy?: boolean;
 };
 
@@ -42,6 +43,13 @@ export async function POST(req: NextRequest) {
       .replace(/^[-_]+/, "")
       .slice(0, 60) || "web";
 
+  // Переменные из формы импорта (или загруженного .env) — рантайм сервиса.
+  // NEXT_PUBLIC_* Next.js вшивает в бандл на сборке, поэтому они идут и в
+  // build env; остальное в образ не пишем — секреты живут только в compose.
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(body.env && typeof body.env === "object" ? body.env : {})) if (typeof v === "string") env[k] = v;
+  const buildEnv = Object.fromEntries(Object.entries(env).filter(([k]) => k.startsWith("NEXT_PUBLIC_")));
+
   let projectId: string | null = null;
   try {
     const project = await createProject(orgId, { name: body.name || repo.split("/")[1], serverId: body.serverId || null });
@@ -55,6 +63,8 @@ export async function POST(req: NextRequest) {
       port: body.port ?? 3000,
       domains: body.domain ? [body.domain.trim().toLowerCase()] : [],
       autoDeploy: true,
+      env,
+      buildEnv,
     });
 
     // Первая сборка — если сервер выбран; её ошибка не отменяет импорт

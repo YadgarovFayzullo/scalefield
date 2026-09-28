@@ -142,7 +142,7 @@ function validate(input: ServiceInput) {
   if (input.repo && !REPO_RE.test(input.repo)) throw new ServiceError("Repository must be owner/name (GitHub) or a git URL");
   for (const d of input.domains ?? []) if (!HOST_RE.test(d)) throw new ServiceError(`Invalid domain: ${d}`);
   for (const v of input.volumes ?? []) if (!/^[^\s:]+:[^\s:]+(:(ro|rw))?$/.test(v)) throw new ServiceError(`Invalid volume: ${v}`);
-  for (const k of Object.keys(input.env ?? {})) if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new ServiceError(`Invalid env name: ${k}`);
+  for (const k of [...Object.keys(input.env ?? {}), ...Object.keys(input.buildEnv ?? {})]) if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new ServiceError(`Invalid env name: ${k}`);
   for (const p of [input.dockerfile, input.buildContext]) {
     if (p && (p.includes("..") || p.startsWith("/"))) throw new ServiceError("Dockerfile/context must be a path inside the repository");
   }

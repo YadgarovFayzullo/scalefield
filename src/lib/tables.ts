@@ -205,7 +205,8 @@ export type ImagesResult = { current: string | null; images: { image: string; at
 export function parseEnvText(text: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const raw of text.split("\n")) {
-    const line = raw.trim();
+    // `export KEY=…` — так пишут .env, которые ещё и source'ят из shell.
+    const line = raw.trim().replace(/^export\s+/, "");
     if (!line || line.startsWith("#")) continue;
     const i = line.indexOf("=");
     if (i <= 0) continue;

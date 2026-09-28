@@ -4,6 +4,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { EnvInput } from "./env-input";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, envToText, parseEnvText, type ServiceInput, type ServiceView } from "@/lib/tables";
 
@@ -137,7 +138,7 @@ export function ServiceSheet({
             {field("Repository", <Input className="h-8 font-mono text-xs" value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/name" />, "GitHub, for the deployments history.")}
           </div>
           {field("Domains", <Textarea className="min-h-16 font-mono text-xs" value={domains} onChange={(e) => setDomains(e.target.value)} placeholder={"app.example.com\napi.example.com"} />, "One per line. Traefik gets a router and a Let's Encrypt certificate.")}
-          {field("Environment", <Textarea className="min-h-28 font-mono text-xs" value={env} onChange={(e) => setEnv(e.target.value)} placeholder={"DATABASE_URL=postgres://…\nNODE_ENV=production"} />, "KEY=VALUE per line. Stored encrypted; written into the compose file on deploy.")}
+          {field("Environment", <EnvInput value={env} onChange={setEnv} placeholder={"DATABASE_URL=postgres://…\nNODE_ENV=production"} />, "KEY=VALUE per line. Stored encrypted; written into the compose file on deploy.")}
           {field("Volumes", <Textarea className="min-h-12 font-mono text-xs" value={volumes} onChange={(e) => setVolumes(e.target.value)} placeholder="/opt/data/app:/data" />, "host:container[:ro] per line.")}
           {field("Command", <Input className="h-8 font-mono text-xs" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="(image default)" />)}
 
@@ -154,7 +155,7 @@ export function ServiceSheet({
             </label>
             {field(
               "Build environment",
-              <Textarea className="min-h-20 font-mono text-xs" value={buildEnv} onChange={(e) => setBuildEnv(e.target.value)} placeholder={"NEXT_PUBLIC_API_URL=https://api.example.com"} />,
+              <EnvInput className="min-h-20 font-mono text-xs" value={buildEnv} onChange={setBuildEnv} placeholder={"NEXT_PUBLIC_API_URL=https://api.example.com"} />,
               "Written to .env.production in the repo before the build (Next.js inlines NEXT_PUBLIC_* at build time) — separate from the runtime Environment above.",
             )}
             <div className="space-y-1 text-xs">

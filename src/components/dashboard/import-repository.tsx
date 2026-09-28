@@ -8,13 +8,15 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/tables";
 import { fmtAgo } from "@/lib/format";
 import type { RepoView } from "@/lib/github-app";
+import { parseEnvText } from "@/lib/tables";
+import { EnvInput } from "./env-input";
 
 type ReposResult = { app: boolean; installed: boolean; orgId?: string; repos: RepoView[]; errors: string[] };
 type ServerOption = { id: string; name: string; online: boolean };
 
 /**
  * Импорт репозитория: список репозиториев установок GitHub App команды с
- * поиском → форма (имя, сервер, ветка, Dockerfile, порт, домен) → проект с
+ * поиском → форма (имя, сервер, ветка, Dockerfile, порт, домен, env) → проект с
  * первой сборкой. Нет установки — кнопка «Install GitHub App» с возвратом сюда.
  */
 export function ImportRepository({ servers }: { servers: ServerOption[] }) {
@@ -123,6 +125,7 @@ function ConfigureProject({
   const [dockerfile, setDockerfile] = React.useState("Dockerfile");
   const [port, setPort] = React.useState("3000");
   const [domain, setDomain] = React.useState("");
+  const [env, setEnv] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -133,7 +136,7 @@ function ConfigureProject({
     try {
       const res = await api<{ project: { slug: string }; deployError: string | null }>("/api/projects", {
         method: "POST",
-        body: JSON.stringify({ name, repo: repo.fullName, branch, serverId: serverId || null, dockerfile, port: Number(port) || null, domain }),
+        body: JSON.stringify({ name, repo: repo.fullName, branch, serverId: serverId || null, dockerfile, port: Number(port) || null, domain, env: parseEnvText(env) }),
       });
       if (res.deployError) alert(`Project created, but the first build did not start: ${res.deployError}`);
       onDone(res.project.slug);
@@ -178,13 +181,18 @@ function ConfigureProject({
       )}
       <div className="grid gap-4 sm:grid-cols-3">
         {field("Branch", "Pushes here redeploy.", <Input value={branch} onChange={(e) => setBranch(e.target.value)} required />)}
-        {field("Dockerfile", null, <Input value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} required />)}
+        {field("Dockerfile", "Path in the repo — the build is docker build.", <Input value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} required />)}
         {field("Port", "The app listens on.", <Input value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" />)}
       </div>
       {field(
         "Domain (optional)",
         "Point its DNS A record at the server; Traefik issues the certificate.",
         <Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="app.example.com" />,
+      )}
+      {field(
+        "Environment Variables",
+        "KEY=VALUE per line, or upload your .env. Stored encrypted; available at runtime, NEXT_PUBLIC_* also at build time.",
+        <EnvInput value={env} onChange={setEnv} placeholder={"DATABASE_URL=postgres://…\nNEXT_PUBLIC_API_URL=https://api.example.com"} />,
       )}
       {error && <p className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-sm text-destructive">{error}</p>}
       <div className="flex justify-between">
