@@ -155,7 +155,7 @@ function VisitorsSection({ state }: { state: ReturnType<typeof useMetric<Visitor
         </div>
       )}
       <VisitorStats data={data} />
-      <VisitorsChart series={data.series ?? []} />
+      <VisitorsChart series={data.series ?? []} days={data.window_days ?? 7} />
       <div className="grid gap-4 lg:grid-cols-2">
         <TopPagesCard pages={data.top_pages ?? []} />
         <ReferrersCard data={data} />

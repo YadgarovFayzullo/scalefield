@@ -200,7 +200,7 @@ export function TrafficChart({
               dataKey="avg_ms"
               stroke="var(--color-avg_ms)"
               strokeWidth={2}
-              dot={false}
+              dot={false} activeDot={false}
             />
           </ComposedChart>
         </ChartContainer>

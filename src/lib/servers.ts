@@ -29,6 +29,7 @@ export class ServerError extends Error {
 
 export type ServerView = {
   id: string;
+  orgId: string;
   name: string;
   host: string;
   provider: string | null;
@@ -57,6 +58,7 @@ const AGENT_ONLINE_WAIT_MS = 90_000;
 function view(s: Server, online: Set<string>): ServerView {
   return {
     id: s.id,
+    orgId: s.orgId,
     name: s.name,
     host: s.host,
     provider: s.provider,
@@ -444,4 +446,28 @@ export async function fixServerProxy(id: string, fallbackEmail = ""): Promise<Ag
 export async function serverJob(id: string, jobId: string, since = 0): Promise<AgentJob> {
   if (!/^[0-9a-f]{32}$/.test(jobId)) throw new ServerError("Bad job id");
   return agentRequest<AgentJob>(await serverAgent(id), `/jobs/${jobId}?since=${since}`);
+}
+
+// ---------- удаление ----------
+
+/**
+ * Убрать сервер из панели. Пока на нём есть проекты или базы — отказ со
+ * списком: сначала перенести или удалить их. Агент на машине не трогаем
+ * (он может обслуживать живой прод) — он просто перестаёт проходить
+ * проверку токена в relay; как снять его руками, панель подсказывает.
+ */
+export async function deleteServer(id: string): Promise<void> {
+  const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, id) });
+  if (!s) throw new ServerError("Unknown server", 404);
+  const [projects, databases] = await Promise.all([
+    db.select({ name: schema.projects.name }).from(schema.projects).where(eq(schema.projects.serverId, id)),
+    db.select({ name: schema.databases.name }).from(schema.databases).where(eq(schema.databases.serverId, id)),
+  ]);
+  if (projects.length > 0) {
+    throw new ServerError(`Projects still run on this server: ${projects.map((p) => p.name).join(", ")}. Delete or move them first.`, 409);
+  }
+  if (databases.length > 0) {
+    throw new ServerError(`Databases still live on this server: ${databases.map((d) => d.name).join(", ")}. Remove them first.`, 409);
+  }
+  await db.delete(schema.servers).where(eq(schema.servers.id, id));
 }

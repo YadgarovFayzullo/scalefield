@@ -25,6 +25,7 @@ import {
   EditTableIcon,
   Table01Icon,
   SourceCodeIcon,
+  Settings02Icon,
   PackageIcon,
 } from "@hugeicons/core-free-icons";
 
@@ -39,6 +40,7 @@ const navItems = [
   { title: "Database", href: "/database", icon: EditTableIcon },
   { title: "Table Editor", href: "/tables", icon: Table01Icon },
   { title: "SQL Editor", href: "/sql", icon: SourceCodeIcon },
+  { title: "Settings", href: "/settings", icon: Settings02Icon },
 ];
 
 type ProjectRef = { slug: string; name: string };

@@ -113,8 +113,25 @@ function dayLabel(ts: number): string {
   return new Date(ts * 1000).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
-export function VisitorsChart({ series }: { series: NonNullable<VisitorsData["series"]> }) {
-  const rows = series.map((s) => ({ day: dayLabel(s.day), visitors: s.visitors, views: s.views }));
+/**
+ * Каждый день окна — точка, даже без визитов (0): иначе при данных за один
+ * день Recharts рисует одинокую точку вместо линии, а пропуски между днями
+ * склеиваются. Дни — UTC-полночь в секундах, как в агенте и visitors-db.
+ */
+function fillDays(series: NonNullable<VisitorsData["series"]>, days: number) {
+  const byDay = new Map(series.map((s) => [s.day, s]));
+  const today = Math.floor(Date.now() / 86_400_000) * 86_400;
+  const out = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const day = today - i * 86_400;
+    const s = byDay.get(day);
+    out.push({ day: dayLabel(day), visitors: s?.visitors ?? 0, views: s?.views ?? 0 });
+  }
+  return out;
+}
+
+export function VisitorsChart({ series, days = 7 }: { series: NonNullable<VisitorsData["series"]>; days?: number }) {
+  const rows = series.length === 0 ? [] : fillDays(series, Math.max(2, days));
   return (
     <Card className="border-border">
       <CardContent className="pt-6">
@@ -133,7 +150,7 @@ export function VisitorsChart({ series }: { series: NonNullable<VisitorsData["se
               <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} />
               <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={11} width={36} allowDecimals={false} />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <Area dataKey="visitors" type="monotone" stroke="var(--chart-1)" fill="url(#visitorsFill)" strokeWidth={2} />
+              <Area dataKey="visitors" type="monotone" stroke="var(--chart-1)" fill="url(#visitorsFill)" strokeWidth={2} dot={false} activeDot={false} />
             </AreaChart>
           </ChartContainer>
         )}

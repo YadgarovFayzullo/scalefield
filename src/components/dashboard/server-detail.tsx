@@ -7,6 +7,17 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon, ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useRouter } from "next/navigation";
 import { ServerStatusBadge } from "@/components/dashboard/servers-list";
 import { ServerProxyCard } from "@/components/dashboard/server-proxy-card";
 import { api } from "@/lib/tables";
@@ -152,6 +163,23 @@ export function ServerDetail() {
     if (el && server?.status === "installing") el.scrollTop = el.scrollHeight;
   }, [server?.installLog, server?.status]);
 
+  const router = useRouter();
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
+
+  async function remove() {
+    setBusy(true);
+    setDeleteError(null);
+    try {
+      await api(`/api/servers/${id}`, { method: "DELETE" });
+      router.push("/servers");
+      router.refresh();
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  }
+
   async function reinstall() {
     setBusy(true);
     try {
@@ -190,12 +218,34 @@ export function ServerDetail() {
                   </p>
                 )}
               </div>
-              {server.transport === "relay" && server.status !== "waiting" && (
-                <Button variant="outline" onClick={reinstall} disabled={busy || server.status === "installing"}>
-                  Reinstall agent
+              <div className="flex items-center gap-2">
+                {server.transport === "relay" && server.status !== "waiting" && (
+                  <Button variant="outline" onClick={reinstall} disabled={busy || server.status === "installing"}>
+                    Reinstall agent
+                  </Button>
+                )}
+                <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)} disabled={busy}>
+                  Delete
                 </Button>
-              )}
+              </div>
+              <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete {server.name}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      The server is removed from Scalefield and its agent can no longer connect. Nothing is stopped on the machine itself
+                      {server.status === "waiting" ? "." : " — to remove an agent installed by Scalefield there, run: cd /opt/scalefield && docker compose down"}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => void remove()}>Delete server</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
+
+            {deleteError && <p className="mb-6 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">{deleteError}</p>}
 
             {server.status === "error" && (
               <div className="mb-6 flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
