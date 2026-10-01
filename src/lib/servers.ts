@@ -111,17 +111,43 @@ async function orgSshKey(orgId: string): Promise<{ orgId: string; publicKey: str
 
 export type CreateServerInput = {
   name?: string;
+  /** IP или hostname; можно сразу `user@host:port`, как в ssh. */
   host: string;
   sshPort?: number;
   sshUser?: string;
   password?: string; // пусто → ключ организации уже добавлен на сервер
+  /** Не задано — auto: ставим, только если 80/443 на сервере свободны. */
   installTraefik?: boolean;
   acmeEmail?: string;
+  /** Не задано — установка сама найдёт Postgres-контейнер на сервере. */
   databaseUrl?: string;
   provider?: string;
 };
 
-type InstallOptions = { password: string | null; installTraefik: boolean; acmeEmail: string; databaseUrl: string | null };
+type InstallOptions = {
+  password: string | null;
+  installTraefik: boolean | "auto";
+  acmeEmail: string;
+  databaseUrl: string | null;
+};
+
+/** `root@1.2.3.4:2222` → части; явные sshUser/sshPort из формы важнее. */
+export function parseTarget(raw: string): { host: string; user?: string; port?: number } {
+  let rest = raw.trim().replace(/^ssh:\/\//, "");
+  let user: string | undefined;
+  const at = rest.lastIndexOf("@");
+  if (at > 0) {
+    user = rest.slice(0, at);
+    rest = rest.slice(at + 1);
+  }
+  let port: number | undefined;
+  const m = rest.match(/^(.*):(\d{1,5})$/);
+  if (m) {
+    rest = m[1];
+    port = Number(m[2]);
+  }
+  return { host: rest.replace(/\/+$/, ""), user, port };
+}
 
 function installEnv() {
   const relayUrl = process.env.RELAY_PUBLIC_URL;
@@ -139,18 +165,21 @@ function installEnv() {
   };
 }
 
-export async function createServer(input: CreateServerInput, orgId: string): Promise<ServerView> {
-  const host = (input.host || "").trim();
+/**
+ * `fallbackEmail` — email того, кто добавляет сервер: им регистрируемся в
+ * Let's Encrypt, если ACME_EMAIL не задан, чтобы не спрашивать в форме.
+ */
+export async function createServer(input: CreateServerInput, orgId: string, fallbackEmail = ""): Promise<ServerView> {
+  const target = parseTarget(input.host || "");
+  const host = target.host;
   if (!HOST_RE.test(host)) throw new ServerError("Host must be an IP address or hostname");
-  const sshPort = input.sshPort ?? 22;
+  const sshPort = input.sshPort ?? target.port ?? 22;
   if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535) throw new ServerError("SSH port is invalid");
-  const sshUser = (input.sshUser || "root").trim();
+  const sshUser = (input.sshUser || target.user || "root").trim();
   if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(sshUser)) throw new ServerError("SSH user is invalid");
-  const acmeEmail = (input.acmeEmail || process.env.ACME_EMAIL || "").trim();
-  const installTraefik = input.installTraefik ?? true;
-  if (installTraefik && !/^[^\s@]+@[^\s@]+$/.test(acmeEmail)) {
-    throw new ServerError("Let's Encrypt needs an email address to install Traefik");
-  }
+  const acmeEmail = (input.acmeEmail || process.env.ACME_EMAIL || fallbackEmail || "").trim();
+  if (acmeEmail && !/^[^\s@]+@[^\s@]+$/.test(acmeEmail)) throw new ServerError("Let's Encrypt email is invalid");
+  const installTraefik: boolean | "auto" = input.installTraefik ?? "auto";
   const databaseUrl = (input.databaseUrl || "").trim() || null;
   if (databaseUrl && !/^postgres(ql)?:\/\//.test(databaseUrl)) throw new ServerError("Database URL must be postgresql://…");
   installEnv(); // проверить окружение до записи в базу
@@ -178,15 +207,15 @@ export async function createServer(input: CreateServerInput, orgId: string): Pro
 }
 
 /** Переустановка агента ключом организации (пароль больше не нужен). */
-export async function reinstallServer(id: string, opts?: { installTraefik?: boolean; acmeEmail?: string }): Promise<ServerDetail> {
+export async function reinstallServer(id: string, opts?: { installTraefik?: boolean; acmeEmail?: string }, fallbackEmail = ""): Promise<ServerDetail> {
   const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, id) });
   if (!s) throw new ServerError("Unknown server", 404);
   if (s.status === "installing") throw new ServerError("Install is already running", 409);
   await db.update(schema.servers).set({ status: "installing", installLog: "", installError: null }).where(eq(schema.servers.id, id));
   startInstall(id, {
     password: null,
-    installTraefik: opts?.installTraefik ?? false,
-    acmeEmail: (opts?.acmeEmail || process.env.ACME_EMAIL || "").trim(),
+    installTraefik: opts?.installTraefik ?? "auto",
+    acmeEmail: (opts?.acmeEmail || process.env.ACME_EMAIL || fallbackEmail || "").trim(),
     databaseUrl: null,
   });
   return (await getServer(id))!;

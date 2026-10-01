@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
   const orgId = primaryOrgId(user);
   if (!orgId) return NextResponse.json({ error: "You are not a member of any team" }, { status: 403 });
   try {
-    const server = await createServer((await req.json()) as CreateServerInput, orgId);
+    const server = await createServer((await req.json()) as CreateServerInput, orgId, user.email);
     return NextResponse.json({ server }, { status: 201 });
   } catch (e) {
     return serverError(e);
