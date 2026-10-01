@@ -11,7 +11,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!(await serverAllowed(req, params))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
   try {
-    const server = await getServer(id);
+    const server = await getServer(id, req.nextUrl.origin);
     if (!server) return NextResponse.json({ error: "Unknown server" }, { status: 404 });
     return NextResponse.json({ server });
   } catch (e) {
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!(await serverAllowed(req, params))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
   try {
-    const body = (await req.json().catch(() => ({}))) as { installTraefik?: boolean; acmeEmail?: string };
+    const body = (await req.json().catch(() => ({}))) as { installTraefik?: boolean; acmeEmail?: string; host?: string; password?: string };
     return NextResponse.json({ server: await reinstallServer(id, body) });
   } catch (e) {
     return serverError(e);

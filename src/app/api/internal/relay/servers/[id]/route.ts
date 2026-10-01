@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { relaySecretOk } from "@/lib/relay";
+import { markAgentConnected } from "@/lib/servers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ const EVENTS = new Set(["connected", "heartbeat", "disconnected"]);
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!relaySecretOk(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const body = (await req.json().catch(() => null)) as { event?: unknown; version?: unknown; hostname?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { event?: unknown; version?: unknown; hostname?: unknown; ip?: unknown } | null;
   const event = typeof body?.event === "string" ? body.event : "";
   if (!EVENTS.has(event)) return NextResponse.json({ error: "unknown event" }, { status: 400 });
 
@@ -26,5 +27,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (typeof body?.hostname === "string") patch.agentHostname = body.hostname;
   const updated = await db.update(schema.servers).set(patch).where(eq(schema.servers.id, id)).returning({ id: schema.servers.id });
   if (updated.length === 0) return NextResponse.json({ error: "unknown server" }, { status: 404 });
+  if (event === "connected") {
+    await markAgentConnected(id, {
+      ip: typeof body?.ip === "string" ? body.ip : undefined,
+      hostname: typeof body?.hostname === "string" ? body.hostname : undefined,
+    });
+  }
   return NextResponse.json({ ok: true });
 }

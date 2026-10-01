@@ -58,6 +58,7 @@ type Agent = {
   ws: WebSocket;
   version: string | null;
   hostname: string | null;
+  ip: string | null; // откуда подключился агент — так control-plane узнаёт адрес сервера, добавленного командой
   connectedAt: number;
   alive: boolean;
   pending: Map<string, Pending>;
@@ -89,6 +90,7 @@ async function report(agent: Agent, event: "connected" | "disconnected" | "heart
       event,
       version: agent.version,
       hostname: agent.hostname,
+      ip: agent.ip,
     });
   } catch (e) {
     console.warn(`[relay] не удалось сообщить control-plane о ${event} ${agent.name}: ${e instanceof Error ? e.message : e}`);
@@ -99,7 +101,7 @@ async function report(agent: Agent, event: "connected" | "disconnected" | "heart
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
 
-function attach(ws: WebSocket, who: { serverId: string; name: string }): void {
+function attach(ws: WebSocket, who: { serverId: string; name: string }, ip: string | null): void {
   const previous = agents.get(who.serverId);
   if (previous) {
     // Агент переподключился раньше, чем мы заметили обрыв старого сокета —
@@ -113,6 +115,7 @@ function attach(ws: WebSocket, who: { serverId: string; name: string }): void {
     ws,
     version: null,
     hostname: null,
+    ip,
     connectedAt: Date.now(),
     alive: true,
     pending: new Map(),
@@ -331,7 +334,10 @@ server.on("upgrade", (req, socket, head) => {
         rejectUpgrade(socket, 401, "Unauthorized");
         return;
       }
-      wss.handleUpgrade(req, socket, head, (ws) => attach(ws, who));
+      // За Traefik настоящий адрес — первый в X-Forwarded-For.
+      const fwd = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+      const ip = (fwd || req.socket.remoteAddress || "").replace(/^::ffff:/, "") || null;
+      wss.handleUpgrade(req, socket, head, (ws) => attach(ws, who, ip));
     })
     .catch((e) => {
       console.error(`[relay] проверка токена не удалась: ${e instanceof Error ? e.message : e}`);

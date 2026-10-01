@@ -99,7 +99,7 @@ export function AddServerSheet({
       <SheetContent className="flex flex-col data-[side=right]:w-full data-[side=right]:sm:max-w-xl">
         <form onSubmit={submit} className="flex h-full flex-col">
           <SheetHeader>
-            <SheetTitle>Add server</SheetTitle>
+            <SheetTitle>Connect with SSH</SheetTitle>
             <SheetDescription>Any Ubuntu/Debian VPS with root access. Paste its address — everything else is detected on the server.</SheetDescription>
           </SheetHeader>
 

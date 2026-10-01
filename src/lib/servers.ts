@@ -6,6 +6,7 @@ import { decryptSecret, encryptSecret } from "@/lib/secrets";
 import { generateAgentToken, hashAgentToken } from "@/lib/agent-token";
 import { relayOnline } from "@/lib/relay";
 import { installScript } from "@/lib/agent-install";
+import { installCommand } from "@/lib/install-link";
 import type { Server } from "@/db/schema";
 
 /**
@@ -42,7 +43,11 @@ export type ServerView = {
   transport: "relay" | "direct";
 };
 
-export type ServerDetail = ServerView & { installLog: string | null };
+/** `installCommand` — только пока сервер ждёт первого подключения агента. */
+export type ServerDetail = ServerView & { installLog: string | null; installCommand: string | null };
+
+/** Имя сервера, пока агент не прислал свой hostname. */
+export const PENDING_NAME = "New server";
 
 const HOST_RE = /^[a-z0-9]([a-z0-9.-]{0,252}[a-z0-9])?$/i;
 const PATH_RE = /^\/[A-Za-z0-9_./-]+$/;
@@ -77,11 +82,15 @@ export async function listServers(orgIds: string[]): Promise<ServerView[]> {
   return rows.map((s) => view(s, new Set(online.keys())));
 }
 
-export async function getServer(id: string): Promise<ServerDetail | null> {
+export async function getServer(id: string, origin = ""): Promise<ServerDetail | null> {
   const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, id) });
   if (!s) return null;
   const online = await relayOnline();
-  return { ...view(s, new Set(online.keys())), installLog: s.installLog };
+  return {
+    ...view(s, new Set(online.keys())),
+    installLog: s.installLog,
+    installCommand: s.status === "waiting" ? installCommand(s.id, origin) : null,
+  };
 }
 
 // ---------- SSH-ключ организации ----------
@@ -206,14 +215,88 @@ export async function createServer(input: CreateServerInput, orgId: string, fall
   return view(server, new Set());
 }
 
+// ---------- «Add server» одной командой ----------
+
+/**
+ * Сервер без адреса и пароля: запись `waiting` с токеном агента. Человек
+ * запускает на сервере команду из панели (src/lib/install-link.ts), агент
+ * подключается к relay — и только тогда мы узнаём IP и hostname
+ * (markAgentConnected). Как claim-токен у Netdata или Edge-агент Portainer.
+ */
+export async function createPendingServer(orgId: string): Promise<ServerView> {
+  installEnv();
+  await orgSshKey(orgId);
+  const token = generateAgentToken();
+  const [server] = await db
+    .insert(schema.servers)
+    .values({
+      orgId,
+      name: PENDING_NAME,
+      host: "",
+      agentTokenEnc: encryptSecret(token),
+      agentTokenHash: hashAgentToken(token),
+      status: "waiting",
+    })
+    .returning();
+  return view(server, new Set());
+}
+
+/** Скрипт для `curl … | sudo bash`: всё определяется на месте (Traefik auto, Postgres сам). */
+export async function pendingInstallScript(serverId: string): Promise<string | null> {
+  const server = await db.query.servers.findFirst({ where: eq(schema.servers.id, serverId) });
+  if (!server) return null;
+  const key = await orgSshKey(server.orgId);
+  return installScript({
+    ...installEnv(),
+    agentToken: decryptSecret(server.agentTokenEnc),
+    sshPublicKey: key.publicKey,
+    installTraefik: "auto",
+    acmeEmail: (process.env.ACME_EMAIL || "").trim(),
+    databaseUrl: null,
+  });
+}
+
+/**
+ * Агент подключился к relay. Для сервера, добавленного командой, это первое,
+ * что мы о нём узнаём: адрес берём из подключения, имя — hostname машины.
+ */
+export async function markAgentConnected(serverId: string, info: { ip?: string; hostname?: string }): Promise<void> {
+  const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, serverId) });
+  if (!s) return;
+  const patch: Partial<typeof schema.servers.$inferInsert> = {};
+  if (!s.host && info.ip && HOST_RE.test(info.ip)) patch.host = info.ip;
+  if (s.name === PENDING_NAME && info.hostname) patch.name = info.hostname.slice(0, 63);
+  if (s.status === "waiting") {
+    patch.status = "ready";
+    patch.installError = null;
+  }
+  if (Object.keys(patch).length > 0) await db.update(schema.servers).set(patch).where(eq(schema.servers.id, serverId));
+}
+
 /** Переустановка агента ключом организации (пароль больше не нужен). */
-export async function reinstallServer(id: string, opts?: { installTraefik?: boolean; acmeEmail?: string }, fallbackEmail = ""): Promise<ServerDetail> {
+export async function reinstallServer(
+  id: string,
+  opts?: { installTraefik?: boolean; acmeEmail?: string; host?: string; password?: string },
+  fallbackEmail = "",
+): Promise<ServerDetail> {
   const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, id) });
   if (!s) throw new ServerError("Unknown server", 404);
   if (s.status === "installing") throw new ServerError("Install is already running", 409);
-  await db.update(schema.servers).set({ status: "installing", installLog: "", installError: null }).where(eq(schema.servers.id, id));
+  // Запасной путь со страницы ожидания: нет терминала — даём адрес и пароль,
+  // и панель ставит агента сама по SSH.
+  const patch: Partial<typeof schema.servers.$inferInsert> = { status: "installing", installLog: "", installError: null };
+  if (opts?.host) {
+    const t = parseTarget(opts.host);
+    if (!HOST_RE.test(t.host)) throw new ServerError("Host must be an IP address or hostname");
+    patch.host = t.host;
+    if (t.user) patch.sshUser = t.user;
+    if (t.port) patch.sshPort = t.port;
+  } else if (!s.host) {
+    throw new ServerError("Server address is required");
+  }
+  await db.update(schema.servers).set(patch).where(eq(schema.servers.id, id));
   startInstall(id, {
-    password: null,
+    password: opts?.password || null,
     installTraefik: opts?.installTraefik ?? "auto",
     acmeEmail: (opts?.acmeEmail || process.env.ACME_EMAIL || fallbackEmail || "").trim(),
     databaseUrl: null,
