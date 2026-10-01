@@ -8,6 +8,7 @@ import { AlertCircleIcon, ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ServerStatusBadge } from "@/components/dashboard/servers-list";
+import { ServerProxyCard } from "@/components/dashboard/server-proxy-card";
 import { api } from "@/lib/tables";
 import { fmtAgo } from "@/lib/format";
 import type { ServerDetail } from "@/lib/servers";
@@ -205,6 +206,8 @@ export function ServerDetail() {
                 </div>
               </div>
             )}
+
+            {server.status !== "waiting" && server.online && <ServerProxyCard serverId={server.id} />}
 
             {server.status === "waiting" ? (
               <WaitingForAgent server={server} onUpdate={setServer} />

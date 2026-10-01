@@ -5,7 +5,8 @@ import { db, schema } from "@/db";
 import { decryptSecret, encryptSecret } from "@/lib/secrets";
 import { generateAgentToken, hashAgentToken } from "@/lib/agent-token";
 import { relayOnline } from "@/lib/relay";
-import { installScript } from "@/lib/agent-install";
+import { installScript, traefikComposeYaml } from "@/lib/agent-install";
+import { agentRef, agentRequest } from "@/lib/agent";
 import { installCommand } from "@/lib/install-link";
 import type { Server } from "@/db/schema";
 
@@ -405,4 +406,40 @@ function sshRun(
         readyTimeout: 20_000,
       });
   });
+}
+
+// ---------- кто держит 80/443 (agent/app/proxy.py) ----------
+
+export type ProxyHolder = { type: "container" | "host"; name: string; image?: string; networks?: string[] };
+export type ProxyState = {
+  ok: boolean;
+  kind: "traefik" | "other" | "none";
+  holder: ProxyHolder | null;
+  /** Что сделает кнопка: подключить свой Traefik к edge, заменить чужой прокси, поставить Traefik; null — только руками. */
+  action: "attach" | "replace" | "install" | null;
+};
+export type AgentJob = { id: string; status: "queued" | "running" | "succeeded" | "failed"; lines: string[]; line_count: number; error: string | null };
+
+async function serverAgent(id: string) {
+  const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, id) });
+  if (!s) throw new ServerError("Unknown server", 404);
+  return agentRef(s);
+}
+
+export async function serverProxyState(id: string): Promise<ProxyState> {
+  return agentRequest<ProxyState>(await serverAgent(id), "/proxy");
+}
+
+/** Починить 80/443 одной кнопкой; compose Traefik — тот же, что ставит установка. */
+export async function fixServerProxy(id: string, fallbackEmail = ""): Promise<AgentJob> {
+  const email = (process.env.ACME_EMAIL || fallbackEmail || "").trim();
+  return agentRequest<AgentJob>(await serverAgent(id), "/jobs/proxy", {
+    method: "POST",
+    body: { traefik_compose: traefikComposeYaml(email) },
+  });
+}
+
+export async function serverJob(id: string, jobId: string, since = 0): Promise<AgentJob> {
+  if (!/^[0-9a-f]{32}$/.test(jobId)) throw new ServerError("Bad job id");
+  return agentRequest<AgentJob>(await serverAgent(id), `/jobs/${jobId}?since=${since}`);
 }
