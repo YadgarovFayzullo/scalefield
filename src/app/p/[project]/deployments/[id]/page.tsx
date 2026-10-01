@@ -42,12 +42,16 @@ export default function DeploymentDetailPage() {
   const id = decodeURIComponent(params.id);
 
   const [deployment, setDeployment] = React.useState<Deployment | null>(null);
+  const [lines, setLines] = React.useState<string[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const linesRef = React.useRef<string[]>([]);
 
   const load = React.useCallback(async () => {
     try {
       const res = await api<{ deployment: Deployment }>(`${apiBase}/deployments/${encodeURIComponent(id)}`);
+      linesRef.current = res.deployment.log ? res.deployment.log.split("\n") : [];
+      setLines(linesRef.current);
       setDeployment(res.deployment);
       setError(null);
     } catch (e) {
@@ -61,12 +65,38 @@ export default function DeploymentDetailPage() {
     void load();
   }, [load]);
 
-  // Пока задача агента не завершена, деплой через панель поллим сами раз в 2 с.
+  const running = Boolean(deployment && deployment.source === "scalefield" && deployment.status !== "completed");
+
+  // Живой лог как у Vercel: пока задача агента идёт, раз в секунду забираем
+  // только новые строки (`?since=`) и дописываем их, а не грузим лог заново.
   React.useEffect(() => {
-    if (!deployment || deployment.source !== "scalefield" || deployment.status === "completed") return;
-    const t = setInterval(() => void load(), 2000);
-    return () => clearInterval(t);
-  }, [deployment, load]);
+    if (!running) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      try {
+        const res = await api<{ deployment: Deployment }>(
+          `${apiBase}/deployments/${encodeURIComponent(id)}?since=${linesRef.current.length}`,
+        );
+        if (stopped) return;
+        const fresh = res.deployment.log_lines ?? [];
+        if (fresh.length) {
+          linesRef.current = [...linesRef.current, ...fresh];
+          setLines(linesRef.current);
+        }
+        setDeployment({ ...res.deployment, log: null });
+        if (res.deployment.status === "completed") return;
+      } catch {
+        // сеть мигнула — следующий тик повторит
+      }
+      if (!stopped) timer = setTimeout(() => void tick(), 1000);
+    };
+    timer = setTimeout(() => void tick(), 1000);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [running, apiBase, id]);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
@@ -83,18 +113,19 @@ export default function DeploymentDetailPage() {
           <p className="text-muted-foreground">{error}</p>
         </div>
       ) : (
-        <DeploymentDetail deployment={deployment} />
+        <DeploymentDetail deployment={deployment} lines={lines} />
       )}
     </div>
   );
 }
 
-function DeploymentDetail({ deployment }: { deployment: Deployment }) {
+function DeploymentDetail({ deployment, lines }: { deployment: Deployment; lines: string[] }) {
   const state = runState(deployment);
   const env = environmentOf(deployment);
   const isAgentDeploy = deployment.source === "scalefield";
   const failed = state === "failure";
-  const errorLine = failed ? lastLogLine(deployment.log) : null;
+  const live = isAgentDeploy && deployment.status !== "completed";
+  const errorLine = failed ? lastLogLine(lines.join("\n")) : null;
 
   return (
     <div className="space-y-6">
@@ -188,16 +219,113 @@ function DeploymentDetail({ deployment }: { deployment: Deployment }) {
         )}
       </div>
 
-      {deployment.log && (
-        <div className="rounded-xl border border-border p-5">
-          <p className="mb-2 text-xs text-muted-foreground">
-            {isAgentDeploy && deployment.status !== "completed" ? "Build Log · running…" : "Build Log"}
-          </p>
-          <pre className="max-h-[32rem] overflow-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
-            {deployment.log}
-          </pre>
+      {(lines.length > 0 || live) && <LiveLog lines={lines} live={live} failed={failed} startedAt={deployment.created_at} />}
+    </div>
+  );
+}
+
+const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]/g;
+
+function lineTone(line: string): string {
+  if (line.startsWith("==> ")) return "font-semibold text-foreground";
+  if (/^(ERROR|error|fatal)\b|\bERROR:/.test(line)) return "text-destructive";
+  if (/^warning\b|\bWARN(ING)?\b/i.test(line)) return "text-amber-600 dark:text-amber-400";
+  if (line.startsWith("$ ")) return "text-blue-600 dark:text-blue-400";
+  return "text-muted-foreground";
+}
+
+/**
+ * Лог деплоя как у Vercel: номера строк, этапы (`==> …`), ошибки красным,
+ * пока идёт — индикатор Live и таймер, окно само едет вниз, пока пользователь
+ * не прокрутил его вверх читать.
+ */
+function LiveLog({ lines, live, failed, startedAt }: { lines: string[]; live: boolean; failed: boolean; startedAt: string }) {
+  const boxRef = React.useRef<HTMLDivElement>(null);
+  const followRef = React.useRef(true);
+  const [now, setNow] = React.useState(() => Date.now());
+  const clean = React.useMemo(() => lines.map((l) => l.replace(ANSI_RE, "")), [lines]);
+  const steps = React.useMemo(
+    () => clean.flatMap((l, i) => (l.startsWith("==> ") ? [{ i, name: l.slice(4) }] : [])),
+    [clean],
+  );
+
+  React.useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [live]);
+
+  React.useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (box && followRef.current) box.scrollTop = box.scrollHeight;
+  }, [clean]);
+
+  const onScroll = () => {
+    const box = boxRef.current;
+    if (box) followRef.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  };
+
+  const jump = (i: number) => {
+    const row = boxRef.current?.querySelector<HTMLElement>(`[data-line="${i}"]`);
+    if (row && boxRef.current) {
+      followRef.current = false;
+      boxRef.current.scrollTop = row.offsetTop - 8;
+    }
+  };
+
+  const elapsed = Math.max(0, Math.round((now - new Date(startedAt).getTime()) / 1000));
+
+  return (
+    <div className="rounded-xl border border-border p-5">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span>Build Log</span>
+        {live && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-2 py-0.5 font-medium text-blue-600 dark:text-blue-400">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
+            Live · {fmtDuration(elapsed)}
+          </span>
+        )}
+        <span className="ml-auto">{clean.length} lines</span>
+      </div>
+      {steps.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {steps.map((s, n) => {
+            const last = n === steps.length - 1;
+            const current = live && last;
+            const broke = failed && last;
+            return (
+              <button
+                key={s.i}
+                type="button"
+                onClick={() => jump(s.i)}
+                className={cn(
+                  "rounded-md border border-border px-2 py-0.5 font-mono text-[11px] hover:bg-muted",
+                  current ? "border-blue-500/50 text-blue-600 dark:text-blue-400" : broke ? "border-destructive/50 text-destructive" : "text-muted-foreground",
+                )}
+              >
+                {current ? "● " : broke ? "✗ " : "✓ "}
+                {s.name}
+              </button>
+            );
+          })}
         </div>
       )}
+      <div
+        ref={boxRef}
+        onScroll={onScroll}
+        className="relative max-h-[36rem] overflow-auto rounded-md border border-border bg-muted/40 py-2 font-mono text-[11px] leading-relaxed"
+      >
+        {clean.length === 0 ? (
+          <div className="px-3 text-muted-foreground">Waiting for output…</div>
+        ) : (
+          clean.map((line, i) => (
+            <div key={i} data-line={i} className="flex gap-3 px-3 hover:bg-muted">
+              <span className="w-8 shrink-0 select-none text-right text-muted-foreground/50">{i + 1}</span>
+              <span className={cn("min-w-0 flex-1 whitespace-pre-wrap break-words", lineTone(line))}>{line || " "}</span>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }

@@ -272,18 +272,31 @@ function ServiceCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Input className="h-8 w-80 font-mono text-xs" placeholder="image:tag to deploy" value={image} onChange={(e) => setImage(e.target.value)} />
-          <Button size="sm" onClick={() => void start("deploy", { image: image.trim() })} disabled={busy || !image.trim()}>
-            <HugeiconsIcon icon={RocketIcon} className={busy ? "animate-pulse" : undefined} />
-            {busy ? "Working…" : c ? "Redeploy" : "Deploy"}
-          </Button>
-          {s.repo && (
+          {s.deployMode === "script" ? (
+            // Своё compose-приложение: образа нет, деплой — код коммита + скрипт из репозитория.
             <>
-              <span className="mx-1 text-xs text-muted-foreground">or</span>
               <Input className="h-8 w-32 font-mono text-xs" placeholder="branch" value={ref} onChange={(e) => setRef(e.target.value)} />
-              <Button size="sm" variant="outline" onClick={() => void start("build", { ref: ref.trim() })} disabled={busy || !ref.trim()}>
-                Build from Git
+              <Button size="sm" onClick={() => void start("build", { ref: ref.trim() })} disabled={busy || !ref.trim() || !s.repo}>
+                <HugeiconsIcon icon={RocketIcon} className={busy ? "animate-pulse" : undefined} />
+                {busy ? "Working…" : "Deploy from Git"}
               </Button>
+            </>
+          ) : (
+            <>
+              <Input className="h-8 w-80 font-mono text-xs" placeholder="image:tag to deploy" value={image} onChange={(e) => setImage(e.target.value)} />
+              <Button size="sm" onClick={() => void start("deploy", { image: image.trim() })} disabled={busy || !image.trim()}>
+                <HugeiconsIcon icon={RocketIcon} className={busy ? "animate-pulse" : undefined} />
+                {busy ? "Working…" : c ? "Redeploy" : "Deploy"}
+              </Button>
+              {s.repo && (
+                <>
+                  <span className="mx-1 text-xs text-muted-foreground">or</span>
+                  <Input className="h-8 w-32 font-mono text-xs" placeholder="branch" value={ref} onChange={(e) => setRef(e.target.value)} />
+                  <Button size="sm" variant="outline" onClick={() => void start("build", { ref: ref.trim() })} disabled={busy || !ref.trim()}>
+                    Build from Git
+                  </Button>
+                </>
+              )}
             </>
           )}
           <div className="flex-1" />

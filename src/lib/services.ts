@@ -130,6 +130,11 @@ export type ServiceInput = {
   dockerfile?: string | null;
   buildContext?: string | null;
   autoDeploy?: boolean;
+  /** Имя CI-workflow GitHub: автодеплой после его успеха, а не на push. */
+  workflow?: string | null;
+  deployMode?: "image" | "script";
+  appDir?: string | null;
+  deployCommand?: string | null;
   /** true — сгенерировать новый секрет webhook, false — удалить. */
   rotateWebhookSecret?: boolean;
 };
@@ -146,6 +151,10 @@ function validate(input: ServiceInput) {
   for (const p of [input.dockerfile, input.buildContext]) {
     if (p && (p.includes("..") || p.startsWith("/"))) throw new ServiceError("Dockerfile/context must be a path inside the repository");
   }
+  if (input.deployMode !== undefined && !["image", "script"].includes(input.deployMode)) throw new ServiceError("Deploy mode: image or script");
+  if (input.appDir && !NAME_RE.test(input.appDir)) throw new ServiceError("App directory: a folder name inside /opt/apps (lowercase, digits, - and _)");
+  if (input.deployCommand && input.deployCommand.length > 500) throw new ServiceError("Deploy command is too long");
+  if (input.workflow && input.workflow.length > 100) throw new ServiceError("Workflow name is too long");
 }
 
 export async function createService(projectId: string, input: ServiceInput): Promise<ServiceView> {
@@ -169,6 +178,10 @@ export async function createService(projectId: string, input: ServiceInput): Pro
       dockerfile: input.dockerfile ?? null,
       buildContext: input.buildContext ?? null,
       autoDeploy: input.autoDeploy ?? false,
+      workflow: input.workflow ?? null,
+      deployMode: input.deployMode ?? "image",
+      appDir: input.appDir ?? null,
+      deployCommand: input.deployCommand ?? null,
       webhookSecretEnc: input.rotateWebhookSecret ? encryptSecret(newSecret()) : null,
     })
     .returning();
@@ -197,6 +210,10 @@ export async function updateService(projectId: string, id: string, input: Servic
   if (input.dockerfile !== undefined) patch.dockerfile = input.dockerfile;
   if (input.buildContext !== undefined) patch.buildContext = input.buildContext;
   if (input.autoDeploy !== undefined) patch.autoDeploy = input.autoDeploy;
+  if (input.workflow !== undefined) patch.workflow = input.workflow;
+  if (input.deployMode !== undefined) patch.deployMode = input.deployMode;
+  if (input.appDir !== undefined) patch.appDir = input.appDir;
+  if (input.deployCommand !== undefined) patch.deployCommand = input.deployCommand;
   if (input.rotateWebhookSecret === true) patch.webhookSecretEnc = encryptSecret(newSecret());
   if (input.rotateWebhookSecret === false) patch.webhookSecretEnc = null;
   if (input.env !== undefined) patch.envEnc = Object.keys(input.env).length ? encryptSecret(JSON.stringify(input.env)) : null;
@@ -284,7 +301,7 @@ async function recordJob(
       updatedAt: new Date(),
       durationS: null,
       log: job.lines.join("\n"),
-      image: opts.image,
+      image: opts.image || null,
     })
     .returning();
   return row;
@@ -312,6 +329,52 @@ export async function deployService(
   });
 }
 
+/** git-URL репозитория сервиса; для приватных GitHub — с токеном установки App (агент его в лог не пишет). */
+async function repoUrlFor(projectId: string, repo: string): Promise<string> {
+  const [proj] = await db.select({ orgId: schema.projects.orgId }).from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1);
+  // Токен установки GitHub App команды (или переходный GITHUB_TOKEN).
+  const token = proj ? await tokenForRepo(proj.orgId, repo) : null;
+  const url = repo.includes("://") ? repo : `https://github.com/${repo}.git`;
+  return token && /^https:\/\/github\.com\//.test(url) ? url.replace("https://github.com/", `https://x-access-token:${token}@github.com/`) : url;
+}
+
+/**
+ * Деплой скриптом: у приложения свой compose-стек (например QRTifact с
+ * docker-compose.prod.yml и миграцией), Scalefield только доставляет код
+ * коммита в /opt/apps/<appDir> и запускает deployCommand — с живым логом.
+ */
+async function scriptDeploy(
+  projectSlug: string,
+  projectId: string,
+  service: ServiceView,
+  opts: { ref?: string; sha?: string; actor?: string; event?: string; title?: string },
+): Promise<DeploymentRow> {
+  if (!service.repo) throw new ServiceError("Service has no repository");
+  if (!service.appDir) throw new ServiceError("Set the app directory for script deploys");
+  if (!service.deployCommand) throw new ServiceError("Set the deploy command for script deploys");
+  const agent = await getProjectAgent(projectSlug);
+  if (!agent) throw new ServiceError("Project has no server/agent", 409);
+  const ref = (opts.ref || service.branch || "main").trim();
+  const job = await agentRequest<AgentJob>(agent, "/jobs/script", {
+    method: "POST",
+    body: {
+      repo_url: await repoUrlFor(projectId, service.repo),
+      ref,
+      sha: opts.sha || null,
+      app_dir: service.appDir,
+      command: service.deployCommand,
+    },
+  });
+  return recordJob(projectId, service, job, {
+    image: "",
+    actor: opts.actor ?? "owner",
+    event: opts.event ?? "manual",
+    title: opts.title ?? `${service.name} ← ${service.repo}@${ref}`,
+    branch: ref,
+    sha: opts.sha ?? null,
+  });
+}
+
 /** Сборка из Git и деплой: образ `<project>/<service>:<ref>-<время>` остаётся на хосте. */
 export async function buildService(
   projectSlug: string,
@@ -321,22 +384,17 @@ export async function buildService(
 ): Promise<DeploymentRow> {
   const service = await getService(projectId, id);
   if (!service) throw new ServiceError("Unknown service", 404);
+  if (service.deployMode === "script") return scriptDeploy(projectSlug, projectId, service, opts);
   if (!service.repo) throw new ServiceError("Service has no repository");
   const agent = await getProjectAgent(projectSlug);
   if (!agent) throw new ServiceError("Project has no server/agent", 409);
   const ref = (opts.ref || service.branch || "main").trim();
   const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15).toLowerCase();
   const image = `${projectSlug}/${service.name}:${ref.replace(/[^a-z0-9._-]/gi, "-").toLowerCase()}-${stamp}`;
-  const [proj] = await db.select({ orgId: schema.projects.orgId }).from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1);
-  // Токен установки GitHub App команды (или переходный GITHUB_TOKEN).
-  const token = proj ? await tokenForRepo(proj.orgId, service.repo) : null;
-  let repoUrl = service.repo.includes("://") ? service.repo : `https://github.com/${service.repo}.git`;
-  // Приватные репозитории GitHub: токен в URL, агент его в лог не пишет.
-  if (token && /^https:\/\/github\.com\//.test(repoUrl)) repoUrl = repoUrl.replace("https://github.com/", `https://x-access-token:${token}@github.com/`);
   const job = await agentRequest<AgentJob>(agent, "/jobs/build", {
     method: "POST",
     body: {
-      repo_url: repoUrl,
+      repo_url: await repoUrlFor(projectId, service.repo),
       ref,
       dockerfile: service.dockerfile || "Dockerfile",
       context: service.buildContext || ".",
@@ -356,14 +414,24 @@ export async function buildService(
   });
 }
 
-/** Подтянуть состояние задачи агента в строку деплоя; завершённые не трогаем. */
+/** Число строк в сохранённом логе — с него агент отдаёт продолжение (`?since=`). */
+export function logLineCount(log: string | null): number {
+  return log ? log.split("\n").length : 0;
+}
+
+/**
+ * Подтянуть состояние задачи агента в строку деплоя; завершённые не трогаем.
+ * Лог дописывается только новыми строками (`/jobs/<id>?since=N`), а не
+ * перезаписывается целиком на каждый опрос.
+ */
 export async function syncDeployment(projectSlug: string, row: DeploymentRow): Promise<DeploymentRow> {
   if (row.source !== "scalefield" || row.status === "completed") return row;
   const agent = await getProjectAgent(projectSlug);
   if (!agent) return row;
+  const known = logLineCount(row.log);
   let job: AgentJob;
   try {
-    job = await agentRequest<AgentJob>(agent, `/jobs/${row.externalId}`);
+    job = await agentRequest<AgentJob>(agent, `/jobs/${row.externalId}?since=${known}`);
   } catch (e) {
     // Агент перезапустился и задачу забыл — закрываем как сбой, чтобы не
     // висела «в процессе» вечно.
@@ -376,17 +444,21 @@ export async function syncDeployment(projectSlug: string, row: DeploymentRow): P
   }
   const done = job.status === "succeeded" || job.status === "failed";
   const patch: Partial<typeof schema.deployments.$inferInsert> = {
-    log: job.lines.join("\n"),
     updatedAt: new Date(),
     sha: job.result?.sha ? job.result.sha : row.sha,
   };
+  if (job.lines.length) {
+    const fresh = job.lines.join("\n");
+    patch.log = known ? `${row.log}\n${fresh}` : fresh;
+  }
   if (done) {
     patch.status = "completed";
     patch.conclusion = job.status === "succeeded" ? "success" : "failure";
     patch.durationS = job.finished_at ? Math.max(0, Math.round(job.finished_at - job.started_at)) : null;
   }
   const [updated] = await db.update(schema.deployments).set(patch).where(eq(schema.deployments.id, row.id)).returning();
-  if (done && job.status === "succeeded" && row.serviceId) {
+  // У деплоя скриптом нет своего образа/контейнера — сервис не трогаем.
+  if (done && job.status === "succeeded" && row.serviceId && job.kind !== "script") {
     await db
       .update(schema.services)
       .set({ image: job.result?.image ?? row.image ?? undefined, container: job.result?.container?.name ?? `${projectSlug}-${(row.title ?? "").split(" ")[0]}` })

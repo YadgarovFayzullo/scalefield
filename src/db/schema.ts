@@ -234,6 +234,14 @@ export const services = pgTable(
     buildEnvEnc: text("build_env_enc"),
     autoDeploy: boolean("auto_deploy").notNull().default(false),
     webhookSecretEnc: text("webhook_secret_enc"),
+    // Как деплоится сервис: image — Scalefield собирает образ и пишет свой
+    // compose-сервис; script — у приложения свой стек, агент раскладывает код
+    // коммита в /opt/apps/<app_dir> и запускает deploy_command (например
+    // `bash scripts/deploy.sh`). `workflow` — имя CI-workflow GitHub: если
+    // задано, автодеплой ждёт его успеха (workflow_run), а не push.
+    deployMode: text("deploy_mode").notNull().default("image"), // image | script
+    appDir: text("app_dir"),
+    deployCommand: text("deploy_command"),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("services_project_name").on(t.projectId, t.name)],

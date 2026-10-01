@@ -38,6 +38,10 @@ export function ServiceSheet({
   const [dockerfile, setDockerfile] = React.useState("");
   const [context, setContext] = React.useState("");
   const [autoDeploy, setAutoDeploy] = React.useState(false);
+  const [deployMode, setDeployMode] = React.useState<"image" | "script">("image");
+  const [appDir, setAppDir] = React.useState("");
+  const [deployCommand, setDeployCommand] = React.useState("");
+  const [workflow, setWorkflow] = React.useState("");
   const [buildEnv, setBuildEnv] = React.useState("");
   const [rotate, setRotate] = React.useState<boolean | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
@@ -59,6 +63,10 @@ export function ServiceSheet({
     setDockerfile(service?.dockerfile ?? "");
     setContext(service?.buildContext ?? "");
     setAutoDeploy(service?.autoDeploy ?? false);
+    setDeployMode(service?.deployMode ?? "image");
+    setAppDir(service?.appDir ?? "");
+    setDeployCommand(service?.deployCommand ?? "");
+    setWorkflow(service?.workflow ?? "");
     setBuildEnv(service ? envToText(service.buildEnv) : "");
     setRotate(undefined);
     setError(null);
@@ -82,6 +90,10 @@ export function ServiceSheet({
       dockerfile: dockerfile.trim() || null,
       buildContext: context.trim() || null,
       autoDeploy,
+      deployMode,
+      appDir: appDir.trim() || null,
+      deployCommand: deployCommand.trim() || null,
+      workflow: workflow.trim() || null,
       buildEnv: parseEnvText(buildEnv),
       ...(rotate === undefined ? {} : { rotateWebhookSecret: rotate }),
     };
@@ -143,18 +155,48 @@ export function ServiceSheet({
           {field("Command", <Input className="h-8 font-mono text-xs" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="(image default)" />)}
 
           <div className="space-y-3 rounded-md border border-dashed border-border p-3">
-            <div className="text-xs font-medium">Build from Git</div>
-            <div className="grid grid-cols-3 gap-2">
-              {field("Branch", <Input className="h-8 font-mono text-xs" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />)}
-              {field("Dockerfile", <Input className="h-8 font-mono text-xs" value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} placeholder="Dockerfile" />)}
-              {field("Context", <Input className="h-8 font-mono text-xs" value={context} onChange={(e) => setContext(e.target.value)} placeholder="." />)}
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-medium">Deploy from Git</div>
+              <select
+                className="h-7 rounded-md border border-border bg-background px-2 text-xs"
+                value={deployMode}
+                onChange={(e) => setDeployMode(e.target.value as "image" | "script")}
+              >
+                <option value="image">Build an image</option>
+                <option value="script">Run the repo&apos;s deploy script</option>
+              </select>
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              Built with the Dockerfile if the repository has one; otherwise Railpack detects the stack (Node/Next.js, Python, Go, PHP, static…) and the app gets $PORT.
-            </p>
+            {deployMode === "image" ? (
+              <>
+                <div className="grid grid-cols-3 gap-2">
+                  {field("Branch", <Input className="h-8 font-mono text-xs" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />)}
+                  {field("Dockerfile", <Input className="h-8 font-mono text-xs" value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} placeholder="Dockerfile" />)}
+                  {field("Context", <Input className="h-8 font-mono text-xs" value={context} onChange={(e) => setContext(e.target.value)} placeholder="." />)}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Built with the Dockerfile if the repository has one; otherwise Railpack detects the stack (Node/Next.js, Python, Go, PHP, static…) and the app gets $PORT.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-[120px_160px_1fr] gap-2">
+                  {field("Branch", <Input className="h-8 font-mono text-xs" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />)}
+                  {field("App directory", <Input className="h-8 font-mono text-xs" value={appDir} onChange={(e) => setAppDir(e.target.value)} placeholder="myapp" />, "/opt/apps/<name>")}
+                  {field("Deploy command", <Input className="h-8 font-mono text-xs" value={deployCommand} onChange={(e) => setDeployCommand(e.target.value)} placeholder="bash scripts/deploy.sh" />, "Runs in the app directory")}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  For apps with their own compose stack: the agent puts the commit&apos;s code into /opt/apps/&lt;app directory&gt; (keeping .env and other server-only files) and runs the command with a live log.
+                </p>
+              </>
+            )}
+            {field(
+              "Wait for CI workflow",
+              <Input className="h-8 font-mono text-xs" value={workflow} onChange={(e) => setWorkflow(e.target.value)} placeholder="(deploy on push)" />,
+              "Name of a GitHub Actions workflow, e.g. CI. Auto-deploy then starts when it succeeds on the branch instead of on the push itself.",
+            )}
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" checked={autoDeploy} onChange={(e) => setAutoDeploy(e.target.checked)} />
-              Auto-deploy on push to the branch (needs the webhook below)
+              {workflow.trim() ? `Auto-deploy when “${workflow.trim()}” passes on the branch` : "Auto-deploy on push to the branch"} (GitHub App)
             </label>
             {field(
               "Build environment",
