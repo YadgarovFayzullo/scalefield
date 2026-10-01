@@ -201,7 +201,7 @@ export function ServerDetail() {
               <div className="mb-6 flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
                 <HugeiconsIcon icon={AlertCircleIcon} className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                 <div>
-                  <p className="text-sm font-medium">Install failed</p>
+                  <p className="text-sm font-medium">{server.online ? "Last install failed — the running agent is not affected" : "Install failed"}</p>
                   <p className="break-words font-mono text-xs text-muted-foreground">{server.installError || "See the log below."}</p>
                 </div>
               </div>

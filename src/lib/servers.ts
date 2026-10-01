@@ -267,7 +267,9 @@ export async function markAgentConnected(serverId: string, info: { ip?: string; 
   const patch: Partial<typeof schema.servers.$inferInsert> = {};
   if (!s.host && info.ip && HOST_RE.test(info.ip)) patch.host = info.ip;
   if (s.name === PENDING_NAME && info.hostname) patch.name = info.hostname.slice(0, 63);
-  if (s.status === "waiting") {
+  // Агент на связи — значит, сервер рабочий, даже если прошлая установка
+  // (например, переустановка по SSH без ключа) упала.
+  if (s.status === "waiting" || s.status === "error") {
     patch.status = "ready";
     patch.installError = null;
   }
