@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { EnvInput } from "./env-input";
+import { RepoPicker } from "./repo-picker";
+import type { RepoInsights } from "@/lib/github-app";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, envToText, parseEnvText, type ServiceInput, type ServiceView } from "@/lib/tables";
 
@@ -42,6 +44,27 @@ export function ServiceSheet({
   const [appDir, setAppDir] = React.useState("");
   const [deployCommand, setDeployCommand] = React.useState("");
   const [workflow, setWorkflow] = React.useState("");
+  const [insights, setInsights] = React.useState<RepoInsights | null>(null);
+  const projectSlug = apiBase.match(/\/projects\/([^/]+)/)?.[1] ?? "";
+
+  // Выбрали репозиторий — подставляем, как Vercel при импорте: ветку по
+  // умолчанию, а если в репозитории свой скрипт деплоя — режим script с ним.
+  const applyInsights = React.useCallback(
+    (info: RepoInsights | null, picked: boolean) => {
+      setInsights(info);
+      if (!info || !picked) return;
+      setBranch(info.defaultBranch);
+      if (info.deployScript) {
+        setDeployMode("script");
+        setDeployCommand((c) => c || `bash ${info.deployScript}`);
+        setAppDir((d) => d || projectSlug);
+      } else {
+        setDeployMode("image");
+      }
+      if (info.workflows.length === 1) setWorkflow((w) => w || info.workflows[0]);
+    },
+    [projectSlug],
+  );
   const [buildEnv, setBuildEnv] = React.useState("");
   const [rotate, setRotate] = React.useState<boolean | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
@@ -67,6 +90,7 @@ export function ServiceSheet({
     setAppDir(service?.appDir ?? "");
     setDeployCommand(service?.deployCommand ?? "");
     setWorkflow(service?.workflow ?? "");
+    setInsights(null);
     setBuildEnv(service ? envToText(service.buildEnv) : "");
     setRotate(undefined);
     setError(null);
@@ -145,9 +169,8 @@ export function ServiceSheet({
             <Input className="h-8 font-mono text-xs" value={container} onChange={(e) => setContainer(e.target.value)} placeholder="auto after first deploy" />,
             "Only containers matching this project decide what shows in Overview and Monitoring. Set it by hand for something deployed outside Scalefield; a Deploy through this panel fills it in automatically.",
           )}
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2">
             {field("Container port", <Input className="h-8 font-mono text-xs" value={port} onChange={(e) => setPort(e.target.value)} placeholder="3000" />, "With domains: Traefik target. Without: published on 127.0.0.1.")}
-            {field("Repository", <Input className="h-8 font-mono text-xs" value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/name" />, "GitHub, for the deployments history.")}
           </div>
           {field("Domains", <Textarea className="min-h-16 font-mono text-xs" value={domains} onChange={(e) => setDomains(e.target.value)} placeholder={"app.example.com\napi.example.com"} />, "One per line. Traefik gets a router and a Let's Encrypt certificate.")}
           {field("Environment", <EnvInput value={env} onChange={setEnv} placeholder={"DATABASE_URL=postgres://…\nNODE_ENV=production"} />, "KEY=VALUE per line. Stored encrypted; written into the compose file on deploy.")}
@@ -166,10 +189,29 @@ export function ServiceSheet({
                 <option value="script">Run the repo&apos;s deploy script</option>
               </select>
             </div>
+            {open && <RepoPicker key={service?.id ?? "new"} value={repo} initialRepo={service?.repo ?? ""} onChange={setRepo} onInsights={applyInsights} />}
+            {insights && (
+              <p className="text-[11px] text-muted-foreground">
+                Found in the repo:{" "}
+                {[
+                  insights.deployScript && `deploy script ${insights.deployScript}`,
+                  insights.composeFiles.length > 0 && insights.composeFiles.join(", "),
+                  insights.hasDockerfile && "Dockerfile",
+                  insights.workflows.length > 0 && `${insights.workflows.length} CI workflow(s)`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "no Dockerfile or deploy script — Railpack will detect the stack"}
+              </p>
+            )}
+            <datalist id="repo-branches">
+              {(insights?.branches ?? []).map((b) => (
+                <option key={b} value={b} />
+              ))}
+            </datalist>
             {deployMode === "image" ? (
               <>
                 <div className="grid grid-cols-3 gap-2">
-                  {field("Branch", <Input className="h-8 font-mono text-xs" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />)}
+                  {field("Branch", <Input className="h-8 font-mono text-xs" list="repo-branches" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />)}
                   {field("Dockerfile", <Input className="h-8 font-mono text-xs" value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} placeholder="Dockerfile" />)}
                   {field("Context", <Input className="h-8 font-mono text-xs" value={context} onChange={(e) => setContext(e.target.value)} placeholder="." />)}
                 </div>
@@ -180,7 +222,7 @@ export function ServiceSheet({
             ) : (
               <>
                 <div className="grid grid-cols-[120px_160px_1fr] gap-2">
-                  {field("Branch", <Input className="h-8 font-mono text-xs" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />)}
+                  {field("Branch", <Input className="h-8 font-mono text-xs" list="repo-branches" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />)}
                   {field("App directory", <Input className="h-8 font-mono text-xs" value={appDir} onChange={(e) => setAppDir(e.target.value)} placeholder="myapp" />, "/opt/apps/<name>")}
                   {field("Deploy command", <Input className="h-8 font-mono text-xs" value={deployCommand} onChange={(e) => setDeployCommand(e.target.value)} placeholder="bash scripts/deploy.sh" />, "Runs in the app directory")}
                 </div>
@@ -191,7 +233,18 @@ export function ServiceSheet({
             )}
             {field(
               "Wait for CI workflow",
-              <Input className="h-8 font-mono text-xs" value={workflow} onChange={(e) => setWorkflow(e.target.value)} placeholder="(deploy on push)" />,
+              insights && insights.workflows.length > 0 ? (
+                <select className="h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs" value={workflow} onChange={(e) => setWorkflow(e.target.value)}>
+                  <option value="">(deploy on push, don&apos;t wait)</option>
+                  {[...new Set([...insights.workflows, ...(workflow ? [workflow] : [])])].map((w) => (
+                    <option key={w} value={w}>
+                      {w}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input className="h-8 font-mono text-xs" value={workflow} onChange={(e) => setWorkflow(e.target.value)} placeholder="(deploy on push)" />
+              ),
               "Name of a GitHub Actions workflow, e.g. CI. Auto-deploy then starts when it succeeds on the branch instead of on the push itself.",
             )}
             <label className="flex items-center gap-2 text-xs">
