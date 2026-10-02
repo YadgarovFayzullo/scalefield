@@ -22,7 +22,7 @@ import time
 from collections import defaultdict
 from urllib.parse import urlparse
 
-from app.collectors.api_traffic import _iter_records
+from app.collectors.api_traffic import _iter_records_since
 from app.config import settings
 
 _BOT_UA = re.compile(
@@ -197,7 +197,7 @@ def _visitors_sync(days: int, hosts: tuple[str, ...] | None) -> dict:
     host_set = {h.lower() for h in hosts} if hosts else None
     current: list[dict] = []
     previous: list[dict] = []
-    for r in _iter_records(path, settings.CADDY_LOG_TAIL_BYTES):
+    for r in _iter_records_since(path, cutoff_previous, settings.VISITORS_LOG_MAX_BYTES):
         ts = r["ts"]
         if ts is None or ts < cutoff_previous:
             continue

@@ -126,6 +126,74 @@ def _iter_records(path: str, max_bytes: int):
             yield parsed
 
 
+def _ts_at(f, offset: int) -> float | None:
+    """Время первой целой строки, начинающейся после `offset` (или None)."""
+    f.seek(offset)
+    if offset:
+        f.readline()  # обрезанная строка
+    for _ in range(50):  # пропускаем не-JSON/не-запросы рядом с точкой
+        line = f.readline()
+        if not line:
+            return None
+        try:
+            parsed = _parse_record(json.loads(line))
+        except ValueError:
+            continue
+        if parsed is not None and parsed["ts"] is not None:
+            return parsed["ts"]
+    return None
+
+
+def _offset_since(f, size: int, since_ts: float, max_bytes: int) -> int:
+    """Смещение, начиная с которого в логе лежат записи не старше `since_ts`.
+
+    Лог дописывается по времени, поэтому отступаем от конца удвоением, пока
+    первая строка не окажется старше окна, затем бинарным поиском сужаем
+    точку старта. Читаются лишь десятки строк, а не весь файл.
+    """
+    limit = min(size, max_bytes)
+    tail = 1 << 20
+    while tail < limit:
+        ts = _ts_at(f, size - tail)
+        if ts is not None and ts < since_ts:
+            break
+        tail *= 2
+    if tail >= limit:
+        return size - limit
+    lo, hi = size - tail, size - tail // 2  # ts(lo) < since_ts <= ts(hi)
+    while hi - lo > 64 * 1024:
+        mid = (lo + hi) // 2
+        ts = _ts_at(f, mid)
+        if ts is not None and ts < since_ts:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+def _iter_records_since(path: str, since_ts: float, max_bytes: int):
+    """Как `_iter_records`, но от начала окна `since_ts`, потоково — без
+    фиксированного хвоста, который на общем логе сервера вмещает лишь ~сутки
+    и обрезал недельную аналитику до последнего дня."""
+    size = os.path.getsize(path)
+    with open(path, "rb") as f:
+        start = _offset_since(f, size, since_ts, max_bytes)
+        f.seek(start)
+        if start:
+            f.readline()
+        for raw in f:
+            line = raw.decode("utf-8", errors="ignore").strip()
+            if not line or line[0] != "{":
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            parsed = _parse_record(rec)
+            if parsed is not None:
+                yield parsed
+
+
 def _percentile(values: list[float], p: float) -> float:
     if not values:
         return 0.0
