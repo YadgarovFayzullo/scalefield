@@ -58,17 +58,21 @@ export function ThemeToggle() {
     return null;
   }
 
+  // "system" разрешаем в фактическую тему, иначе первый клик из тёмной
+  // системной темы переключал бы на светлую «вслепую».
+  const isDark =
+    theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+
   return (
     <Button
       variant="ghost"
       size="icon"
-      onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
       className="relative"
-      aria-label="Toggle theme"
+      aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
       data-theme-toggle
     >
-      <SunIcon />
-      <MoonIcon />
+      {isDark ? <SunIcon /> : <MoonIcon />}
       <span className="sr-only">Toggle theme</span>
     </Button>
   );

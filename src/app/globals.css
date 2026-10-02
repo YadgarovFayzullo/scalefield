@@ -190,22 +190,3 @@
     background-color: rgba(255, 255, 255, 0.3) !important;
   }
 }
-
-/* Theme toggle icon animations */
-@layer components {
-  .dark [data-theme-toggle] svg:first-child {
-    display: none;
-  }
-
-  .dark [data-theme-toggle] svg:last-child {
-    display: block;
-  }
-
-  [data-theme-toggle] svg:first-child {
-    display: block;
-  }
-
-  [data-theme-toggle] svg:last-child {
-    display: none;
-  }
-}

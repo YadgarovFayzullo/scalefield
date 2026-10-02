@@ -15,33 +15,56 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  DashboardSquare02Icon,
-  GroupLayersIcon,
-  ChartLineData01Icon,
-  FileScriptIcon,
-  Activity03Icon,
-  EditTableIcon,
-  Table01Icon,
-  SourceCodeIcon,
-  Settings02Icon,
-  PackageIcon,
-} from "@hugeicons/core-free-icons";
+import * as React from "react";
+import type { AnimatedIconHandle, AnimatedIconProps } from "@/components/ui/types";
+import LayoutDashboardIcon from "@/components/ui/layout-dashboard-icon";
+import PlugConnectedIcon from "@/components/ui/plug-connected-icon";
+import RocketIcon from "@/components/ui/rocket-icon";
+import GaugeIcon from "@/components/ui/gauge-icon";
+import ChartLineIcon from "@/components/ui/chart-line-icon";
+import FileDescriptionIcon from "@/components/ui/file-description-icon";
+import Stack3Icon from "@/components/ui/stack-3-icon";
+import UnorderedListIcon from "@/components/ui/unordered-list-icon";
+import CodeIcon from "@/components/ui/code-icon";
+import GearIcon from "@/components/ui/gear-icon";
 
-// Разделы проекта; href относительно /p/<slug>.
-const navItems = [
-  { title: "Overview", href: "", icon: DashboardSquare02Icon },
-  { title: "Services", href: "/services", icon: PackageIcon },
-  { title: "Deployments", href: "/deployments", icon: GroupLayersIcon },
-  { title: "Monitoring", href: "/monitoring", icon: Activity03Icon },
-  { title: "Analytics", href: "/analytics", icon: ChartLineData01Icon },
-  { title: "Logs", href: "/logs", icon: FileScriptIcon },
-  { title: "Database", href: "/database", icon: EditTableIcon },
-  { title: "Table Editor", href: "/tables", icon: Table01Icon },
-  { title: "SQL Editor", href: "/sql", icon: SourceCodeIcon },
-  { title: "Settings", href: "/settings", icon: Settings02Icon },
+type AnimatedIcon = React.ForwardRefExoticComponent<AnimatedIconProps & React.RefAttributes<AnimatedIconHandle>>;
+
+// Разделы проекта; href относительно /p/<slug>. Иконки — анимированные
+// (itshover.com): анимация запускается наведением на всю строку меню.
+const navItems: { title: string; href: string; icon: AnimatedIcon }[] = [
+  { title: "Overview", href: "", icon: LayoutDashboardIcon },
+  { title: "Services", href: "/services", icon: PlugConnectedIcon },
+  { title: "Deployments", href: "/deployments", icon: RocketIcon },
+  { title: "Monitoring", href: "/monitoring", icon: GaugeIcon },
+  { title: "Analytics", href: "/analytics", icon: ChartLineIcon },
+  { title: "Logs", href: "/logs", icon: FileDescriptionIcon },
+  { title: "Database", href: "/database", icon: Stack3Icon },
+  { title: "Table Editor", href: "/tables", icon: UnorderedListIcon },
+  { title: "SQL Editor", href: "/sql", icon: CodeIcon },
+  { title: "Settings", href: "/settings", icon: GearIcon },
 ];
+
+function NavItem({ title, href, icon: Icon, isActive }: { title: string; href: string; icon: AnimatedIcon; isActive: boolean }) {
+  const iconRef = React.useRef<AnimatedIconHandle>(null);
+
+  return (
+    <SidebarMenuItem>
+      <Link href={href}>
+        <SidebarMenuButton
+          isActive={isActive}
+          tooltip={title}
+          className="h-11 px-3 cursor-pointer [&_svg]:size-5 group-data-[collapsible=icon]:p-1.5!"
+          onMouseEnter={() => iconRef.current?.startAnimation()}
+          onMouseLeave={() => iconRef.current?.stopAnimation()}
+        >
+          <Icon ref={iconRef} size={20} className="shrink-0" />
+          <span className="text-base">{title}</span>
+        </SidebarMenuButton>
+      </Link>
+    </SidebarMenuItem>
+  );
+}
 
 type ProjectRef = { slug: string; name: string };
 
@@ -89,22 +112,7 @@ export function AppSidebar({ project, projects }: { project: ProjectRef; project
             <SidebarMenu className="gap-1.5">
               {navItems.map((item) => {
                 const href = base + item.href;
-                const isActive = pathname === href;
-
-                return (
-                  <SidebarMenuItem key={href}>
-                    <Link href={href}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        tooltip={item.title}
-                        className="h-11 px-3 cursor-pointer"
-                      >
-                        <HugeiconsIcon icon={item.icon} className="h-5 w-5" />
-                        <span className="text-base">{item.title}</span>
-                      </SidebarMenuButton>
-                    </Link>
-                  </SidebarMenuItem>
-                );
+                return <NavItem key={href} title={item.title} href={href} icon={item.icon} isActive={pathname === href} />;
               })}
             </SidebarMenu>
           </SidebarGroupContent>
