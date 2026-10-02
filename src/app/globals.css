@@ -103,7 +103,7 @@
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: oklch(0.235 0 0); /* светлее фона страницы (sidebar 0.205): карточки без рамки */
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
@@ -188,24 +188,5 @@
 
   .dark ::-webkit-scrollbar-thumb:hover {
     background-color: rgba(255, 255, 255, 0.3) !important;
-  }
-}
-
-/* Theme toggle icon animations */
-@layer components {
-  .dark [data-theme-toggle] svg:first-child {
-    display: none;
-  }
-
-  .dark [data-theme-toggle] svg:last-child {
-    display: block;
-  }
-
-  [data-theme-toggle] svg:first-child {
-    display: block;
-  }
-
-  [data-theme-toggle] svg:last-child {
-    display: none;
   }
 }

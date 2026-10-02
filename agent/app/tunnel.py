@@ -25,7 +25,20 @@ from app.config import settings
 
 log = logging.getLogger("scalefield.tunnel")
 
-AGENT_VERSION = "1.2.0"
+AGENT_VERSION = "1.3.0"
+
+
+def host_hostname() -> str:
+    """Имя машины, а не контейнера: агент видит корень хоста в /host (compose).
+    По нему панель называет сервер, добавленный одной кнопкой."""
+    for path in ("/host/etc/hostname", "/host/proc/sys/kernel/hostname"):
+        try:
+            name = open(path, encoding="utf-8").read().strip()
+        except OSError:
+            continue
+        if name:
+            return name
+    return socket.gethostname()
 # Логи контейнеров и результаты задач могут быть большими — лимит relay такой же.
 MAX_MESSAGE = 64 * 1024 * 1024
 MAX_BACKOFF_S = 60.0
@@ -60,7 +73,7 @@ async def stop_tunnel() -> None:
 
 async def _run(app, url: str, token: str) -> None:
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://agent", timeout=None)
-    hello = json.dumps({"type": "hello", "version": AGENT_VERSION, "hostname": socket.gethostname()})
+    hello = json.dumps({"type": "hello", "version": AGENT_VERSION, "hostname": host_hostname()})
     backoff = 1.0
     while True:
         try:

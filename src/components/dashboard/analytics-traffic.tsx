@@ -207,7 +207,7 @@ export function TrafficCharts({ series }: { series: TrafficBucket[] }) {
               fill="var(--color-errorPct)"
               fillOpacity={0.15}
               strokeWidth={2}
-              dot={false}
+              dot={false} activeDot={false}
             />
           </AreaChart>
         </ChartContainer>
@@ -223,8 +223,8 @@ export function TrafficCharts({ series }: { series: TrafficBucket[] }) {
               cursor={false}
               content={<ChartTooltipContent labelFormatter={tooltipLabel} formatter={makeFormatter(latencyConfig, fmtMs)} />}
             />
-            <Line dataKey="avg_ms" type="monotone" stroke="var(--color-avg_ms)" strokeWidth={2} dot={false} />
-            <Line dataKey="p95_ms" type="monotone" stroke="var(--color-p95_ms)" strokeWidth={2} dot={false} />
+            <Line dataKey="avg_ms" type="monotone" stroke="var(--color-avg_ms)" strokeWidth={2} dot={false} activeDot={false} />
+            <Line dataKey="p95_ms" type="monotone" stroke="var(--color-p95_ms)" strokeWidth={2} dot={false} activeDot={false} />
           </LineChart>
         </ChartContainer>
       </ChartCard>
@@ -246,7 +246,7 @@ export function TrafficCharts({ series }: { series: TrafficBucket[] }) {
               fill="var(--color-bytes)"
               fillOpacity={0.15}
               strokeWidth={2}
-              dot={false}
+              dot={false} activeDot={false}
             />
           </AreaChart>
         </ChartContainer>

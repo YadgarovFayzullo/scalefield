@@ -70,8 +70,8 @@ export function MonitoringTraffic({ api }: { api: ApiData }) {
               <YAxis yAxisId="right" orientation="right" hide />
               <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
               <Bar yAxisId="left" dataKey="requests" fill="var(--color-requests)" radius={[2, 2, 0, 0]} />
-              <Line yAxisId="right" type="monotone" dataKey="e5xx" stroke="var(--color-e5xx)" strokeWidth={2} dot={false} />
-              <Line yAxisId="right" type="monotone" dataKey="e4xx" stroke="var(--color-e4xx)" strokeWidth={1.5} dot={false} strokeDasharray="3 3" />
+              <Line yAxisId="right" type="monotone" dataKey="e5xx" stroke="var(--color-e5xx)" strokeWidth={2} dot={false} activeDot={false} />
+              <Line yAxisId="right" type="monotone" dataKey="e4xx" stroke="var(--color-e4xx)" strokeWidth={1.5} dot={false} activeDot={false} strokeDasharray="3 3" />
             </ComposedChart>
           </ChartContainer>
         )}

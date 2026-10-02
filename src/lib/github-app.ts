@@ -351,3 +351,55 @@ export async function listRepositories(orgId: string): Promise<{ installed: bool
   const list = [...repos.values()].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
   return { installed: installs.length > 0, repos: list, errors };
 }
+
+export type RepoInsights = {
+  fullName: string;
+  defaultBranch: string;
+  branches: string[];
+  /** Имена workflow GitHub Actions — кандидаты для «Wait for CI workflow». */
+  workflows: string[];
+  hasDockerfile: boolean;
+  /** Скрипт деплоя в репозитории (scripts/deploy.sh, deploy.sh) — признак своего стека. */
+  deployScript: string | null;
+  composeFiles: string[];
+};
+
+const DEPLOY_SCRIPTS = ["scripts/deploy.sh", "deploy.sh", "bin/deploy"];
+const COMPOSE_FILES = ["docker-compose.prod.yml", "docker-compose.production.yml", "compose.prod.yaml", "docker-compose.yml", "compose.yaml"];
+
+/**
+ * Что Scalefield видит в репозитории при подключении к сервису — чтобы
+ * подставить настройки, как Vercel при импорте: ветку по умолчанию, режим
+ * деплоя (есть свой скрипт → script, иначе образ) и CI-workflow для ожидания.
+ * Ошибки отдельных запросов не валят ответ: нет права Actions — просто нет
+ * списка workflow.
+ */
+export async function repoInsights(orgId: string, repo: string): Promise<RepoInsights> {
+  const token = await tokenForRepo(orgId, repo);
+  const headers = token ? { ...HEADERS, Authorization: `Bearer ${token}` } : HEADERS;
+  const get = async <T>(path: string): Promise<T | null> => {
+    const res = await fetch(`${API}/repos/${repo}${path}`, { headers, cache: "no-store" });
+    return res.ok ? ((await res.json()) as T) : null;
+  };
+  const meta = await get<{ full_name: string; default_branch: string }>("");
+  if (!meta) throw new Error("Repository not found or the GitHub App has no access to it");
+  const [branches, workflows, root, scripts] = await Promise.all([
+    get<{ name: string }[]>("/branches?per_page=100"),
+    get<{ workflows: { name: string; state: string }[] }>("/actions/workflows?per_page=100"),
+    get<{ name: string; type: string }[]>(`/contents/?ref=${encodeURIComponent(meta.default_branch)}`),
+    get<{ name: string; type: string }[]>(`/contents/scripts?ref=${encodeURIComponent(meta.default_branch)}`),
+  ]);
+  const files = new Set([
+    ...(root ?? []).filter((f) => f.type === "file").map((f) => f.name),
+    ...(scripts ?? []).filter((f) => f.type === "file").map((f) => `scripts/${f.name}`),
+  ]);
+  return {
+    fullName: meta.full_name,
+    defaultBranch: meta.default_branch || "main",
+    branches: (branches ?? []).map((b) => b.name),
+    workflows: (workflows?.workflows ?? []).filter((w) => w.state === "active").map((w) => w.name),
+    hasDockerfile: files.has("Dockerfile"),
+    deployScript: DEPLOY_SCRIPTS.find((p) => files.has(p)) ?? null,
+    composeFiles: COMPOSE_FILES.filter((p) => files.has(p)),
+  };
+}

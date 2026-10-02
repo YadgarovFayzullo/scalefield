@@ -189,6 +189,9 @@ export type Deployment = {
   service?: string | null;
   domains?: string[];
   log?: string | null;
+  /** С `?since=N`: строки лога после N-й и их общее число. */
+  log_lines?: string[];
+  line_count?: number;
   image?: string | null;
 };
 

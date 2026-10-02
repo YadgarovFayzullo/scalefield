@@ -11,6 +11,8 @@ export const dynamic = "force-dynamic";
  * Единый webhook GitHub App (как у Vercel — не по webhook'у на сервис):
  *  - push → сборка сервисов с этим репозиторием, веткой и autoDeploy, но
  *    только в командах, к которым привязана установка, приславшая событие;
+ *  - workflow_run completed/success → деплой сервисов, у которых задан
+ *    `workflow` с этим именем: они ждут зелёного CI, а не сам push;
  *  - installation deleted → отвязываем установку от всех команд.
  * Подпись — webhook secret приложения. Ответ сразу, сборка у агента в фоне.
  */
@@ -22,6 +24,16 @@ type PushPayload = {
   installation?: { id?: number };
   pusher?: { name?: string };
   head_commit?: { message?: string };
+  workflow_run?: {
+    name?: string;
+    status?: string;
+    conclusion?: string | null;
+    event?: string;
+    head_branch?: string;
+    head_sha?: string;
+    display_title?: string;
+    actor?: { login?: string };
+  };
 };
 
 export async function POST(req: NextRequest) {
@@ -44,10 +56,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, removed: payload.installation.id });
   }
 
-  if (event !== "push") return NextResponse.json({ ok: true, ignored: event });
+  if (event !== "push" && event !== "workflow_run") return NextResponse.json({ ok: true, ignored: event });
+  const run = payload.workflow_run;
+  if (event === "workflow_run" && (payload.action !== "completed" || run?.conclusion !== "success" || run?.event !== "push")) {
+    return NextResponse.json({ ok: true, ignored: `workflow_run ${payload.action}/${run?.conclusion}/${run?.event}` });
+  }
   const repo = payload.repository?.full_name;
   const installationId = payload.installation?.id ? String(payload.installation.id) : null;
-  const branch = (payload.ref || "").replace(/^refs\/heads\//, "");
+  const branch = event === "push" ? (payload.ref || "").replace(/^refs\/heads\//, "") : run?.head_branch || "";
   if (!repo || !installationId || payload.deleted) return NextResponse.json({ ok: true, ignored: "no repo/installation" });
 
   const targets = await db
@@ -64,13 +80,16 @@ export async function POST(req: NextRequest) {
   const errors: string[] = [];
   for (const { service, project } of targets) {
     if ((service.branch || "main") !== branch) continue;
+    // Сервис с workflow деплоится по его успеху, а не по самому push — и наоборот.
+    const waitsForCi = Boolean(service.workflow?.trim());
+    if (event === "push" ? waitsForCi : !waitsForCi || service.workflow!.trim().toLowerCase() !== (run?.name || "").toLowerCase()) continue;
     try {
       const row = await buildService(project.slug, project.id, service.id, {
         ref: branch,
-        sha: payload.after,
-        actor: payload.pusher?.name || "github",
-        event: "push",
-        title: (payload.head_commit?.message || `push ${branch}`).split("\n")[0].slice(0, 200),
+        sha: event === "push" ? payload.after : run?.head_sha,
+        actor: (event === "push" ? payload.pusher?.name : run?.actor?.login) || "github",
+        event: event === "push" ? "push" : `ci: ${run?.name}`,
+        title: ((event === "push" ? payload.head_commit?.message : run?.display_title) || `push ${branch}`).split("\n")[0].slice(0, 200),
       });
       started.push(row.externalId);
     } catch (e) {

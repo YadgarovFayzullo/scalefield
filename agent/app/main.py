@@ -7,6 +7,7 @@ HTTP-трафик (лог прокси), логи контейнеров. Деп
 """
 from __future__ import annotations
 
+import asyncio
 import time
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -30,6 +31,8 @@ from app.deploy import (
     stack as read_stack,
 )
 from app.jobs import get_job, start_job
+from app.script import ScriptSpec, run_script_job, validate as validate_script
+from app.proxy import ReplaceSpec, detect as detect_proxy, run_fix_job as run_proxy_fix_job
 from app.db import close_pool, get_pool
 from app.dbproxy import router as db_router
 from app.security import require_token
@@ -223,6 +226,29 @@ async def job_build(spec: BuildSpec) -> dict:
     except DeployError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return job.to_dict()
+
+
+@app.post("/jobs/script", dependencies=[Depends(require_token)])
+async def job_script(spec: ScriptSpec) -> dict:
+    """Забрать коммит, разложить код в каталог приложения и выполнить его команду деплоя."""
+    try:
+        validate_script(spec)
+    except DeployError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    meta = {"app_dir": spec.app_dir, "ref": spec.ref, "sha": spec.sha}
+    return start_job("script", meta, run_script_job(spec)).to_dict()
+
+
+@app.get("/proxy", dependencies=[Depends(require_token)])
+async def proxy_state() -> dict:
+    """Кто держит 80/443 и работают ли домены Scalefield (Traefik в сети edge)."""
+    return await asyncio.to_thread(detect_proxy)
+
+
+@app.post("/jobs/proxy", dependencies=[Depends(require_token)])
+async def job_proxy(spec: ReplaceSpec) -> dict:
+    """Починить 80/443: подключить свой Traefik к edge или заменить чужой прокси нашим."""
+    return start_job("proxy", {}, run_proxy_fix_job(spec)).to_dict()
 
 
 @app.get("/jobs/{job_id}", dependencies=[Depends(require_token)])

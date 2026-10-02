@@ -5,7 +5,9 @@ import { db, schema } from "@/db";
 import { decryptSecret, encryptSecret } from "@/lib/secrets";
 import { generateAgentToken, hashAgentToken } from "@/lib/agent-token";
 import { relayOnline } from "@/lib/relay";
-import { installScript } from "@/lib/agent-install";
+import { installScript, traefikComposeYaml } from "@/lib/agent-install";
+import { agentRef, agentRequest } from "@/lib/agent";
+import { installCommand } from "@/lib/install-link";
 import type { Server } from "@/db/schema";
 
 /**
@@ -27,6 +29,7 @@ export class ServerError extends Error {
 
 export type ServerView = {
   id: string;
+  orgId: string;
   name: string;
   host: string;
   provider: string | null;
@@ -42,7 +45,11 @@ export type ServerView = {
   transport: "relay" | "direct";
 };
 
-export type ServerDetail = ServerView & { installLog: string | null };
+/** `installCommand` — только пока сервер ждёт первого подключения агента. */
+export type ServerDetail = ServerView & { installLog: string | null; installCommand: string | null };
+
+/** Имя сервера, пока агент не прислал свой hostname. */
+export const PENDING_NAME = "New server";
 
 const HOST_RE = /^[a-z0-9]([a-z0-9.-]{0,252}[a-z0-9])?$/i;
 const PATH_RE = /^\/[A-Za-z0-9_./-]+$/;
@@ -51,6 +58,7 @@ const AGENT_ONLINE_WAIT_MS = 90_000;
 function view(s: Server, online: Set<string>): ServerView {
   return {
     id: s.id,
+    orgId: s.orgId,
     name: s.name,
     host: s.host,
     provider: s.provider,
@@ -77,11 +85,15 @@ export async function listServers(orgIds: string[]): Promise<ServerView[]> {
   return rows.map((s) => view(s, new Set(online.keys())));
 }
 
-export async function getServer(id: string): Promise<ServerDetail | null> {
+export async function getServer(id: string, origin = ""): Promise<ServerDetail | null> {
   const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, id) });
   if (!s) return null;
   const online = await relayOnline();
-  return { ...view(s, new Set(online.keys())), installLog: s.installLog };
+  return {
+    ...view(s, new Set(online.keys())),
+    installLog: s.installLog,
+    installCommand: s.status === "waiting" ? installCommand(s.id, origin) : null,
+  };
 }
 
 // ---------- SSH-ключ организации ----------
@@ -111,17 +123,43 @@ async function orgSshKey(orgId: string): Promise<{ orgId: string; publicKey: str
 
 export type CreateServerInput = {
   name?: string;
+  /** IP или hostname; можно сразу `user@host:port`, как в ssh. */
   host: string;
   sshPort?: number;
   sshUser?: string;
   password?: string; // пусто → ключ организации уже добавлен на сервер
+  /** Не задано — auto: ставим, только если 80/443 на сервере свободны. */
   installTraefik?: boolean;
   acmeEmail?: string;
+  /** Не задано — установка сама найдёт Postgres-контейнер на сервере. */
   databaseUrl?: string;
   provider?: string;
 };
 
-type InstallOptions = { password: string | null; installTraefik: boolean; acmeEmail: string; databaseUrl: string | null };
+type InstallOptions = {
+  password: string | null;
+  installTraefik: boolean | "auto";
+  acmeEmail: string;
+  databaseUrl: string | null;
+};
+
+/** `root@1.2.3.4:2222` → части; явные sshUser/sshPort из формы важнее. */
+export function parseTarget(raw: string): { host: string; user?: string; port?: number } {
+  let rest = raw.trim().replace(/^ssh:\/\//, "");
+  let user: string | undefined;
+  const at = rest.lastIndexOf("@");
+  if (at > 0) {
+    user = rest.slice(0, at);
+    rest = rest.slice(at + 1);
+  }
+  let port: number | undefined;
+  const m = rest.match(/^(.*):(\d{1,5})$/);
+  if (m) {
+    rest = m[1];
+    port = Number(m[2]);
+  }
+  return { host: rest.replace(/\/+$/, ""), user, port };
+}
 
 function installEnv() {
   const relayUrl = process.env.RELAY_PUBLIC_URL;
@@ -139,18 +177,21 @@ function installEnv() {
   };
 }
 
-export async function createServer(input: CreateServerInput, orgId: string): Promise<ServerView> {
-  const host = (input.host || "").trim();
+/**
+ * `fallbackEmail` — email того, кто добавляет сервер: им регистрируемся в
+ * Let's Encrypt, если ACME_EMAIL не задан, чтобы не спрашивать в форме.
+ */
+export async function createServer(input: CreateServerInput, orgId: string, fallbackEmail = ""): Promise<ServerView> {
+  const target = parseTarget(input.host || "");
+  const host = target.host;
   if (!HOST_RE.test(host)) throw new ServerError("Host must be an IP address or hostname");
-  const sshPort = input.sshPort ?? 22;
+  const sshPort = input.sshPort ?? target.port ?? 22;
   if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535) throw new ServerError("SSH port is invalid");
-  const sshUser = (input.sshUser || "root").trim();
+  const sshUser = (input.sshUser || target.user || "root").trim();
   if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(sshUser)) throw new ServerError("SSH user is invalid");
-  const acmeEmail = (input.acmeEmail || process.env.ACME_EMAIL || "").trim();
-  const installTraefik = input.installTraefik ?? true;
-  if (installTraefik && !/^[^\s@]+@[^\s@]+$/.test(acmeEmail)) {
-    throw new ServerError("Let's Encrypt needs an email address to install Traefik");
-  }
+  const acmeEmail = (input.acmeEmail || process.env.ACME_EMAIL || fallbackEmail || "").trim();
+  if (acmeEmail && !/^[^\s@]+@[^\s@]+$/.test(acmeEmail)) throw new ServerError("Let's Encrypt email is invalid");
+  const installTraefik: boolean | "auto" = input.installTraefik ?? "auto";
   const databaseUrl = (input.databaseUrl || "").trim() || null;
   if (databaseUrl && !/^postgres(ql)?:\/\//.test(databaseUrl)) throw new ServerError("Database URL must be postgresql://…");
   installEnv(); // проверить окружение до записи в базу
@@ -177,16 +218,92 @@ export async function createServer(input: CreateServerInput, orgId: string): Pro
   return view(server, new Set());
 }
 
+// ---------- «Add server» одной командой ----------
+
+/**
+ * Сервер без адреса и пароля: запись `waiting` с токеном агента. Человек
+ * запускает на сервере команду из панели (src/lib/install-link.ts), агент
+ * подключается к relay — и только тогда мы узнаём IP и hostname
+ * (markAgentConnected). Как claim-токен у Netdata или Edge-агент Portainer.
+ */
+export async function createPendingServer(orgId: string): Promise<ServerView> {
+  installEnv();
+  await orgSshKey(orgId);
+  const token = generateAgentToken();
+  const [server] = await db
+    .insert(schema.servers)
+    .values({
+      orgId,
+      name: PENDING_NAME,
+      host: "",
+      agentTokenEnc: encryptSecret(token),
+      agentTokenHash: hashAgentToken(token),
+      status: "waiting",
+    })
+    .returning();
+  return view(server, new Set());
+}
+
+/** Скрипт для `curl … | sudo bash`: всё определяется на месте (Traefik auto, Postgres сам). */
+export async function pendingInstallScript(serverId: string): Promise<string | null> {
+  const server = await db.query.servers.findFirst({ where: eq(schema.servers.id, serverId) });
+  if (!server) return null;
+  const key = await orgSshKey(server.orgId);
+  return installScript({
+    ...installEnv(),
+    agentToken: decryptSecret(server.agentTokenEnc),
+    sshPublicKey: key.publicKey,
+    installTraefik: "auto",
+    acmeEmail: (process.env.ACME_EMAIL || "").trim(),
+    databaseUrl: null,
+  });
+}
+
+/**
+ * Агент подключился к relay. Для сервера, добавленного командой, это первое,
+ * что мы о нём узнаём: адрес берём из подключения, имя — hostname машины.
+ */
+export async function markAgentConnected(serverId: string, info: { ip?: string; hostname?: string }): Promise<void> {
+  const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, serverId) });
+  if (!s) return;
+  const patch: Partial<typeof schema.servers.$inferInsert> = {};
+  if (!s.host && info.ip && HOST_RE.test(info.ip)) patch.host = info.ip;
+  if (s.name === PENDING_NAME && info.hostname) patch.name = info.hostname.slice(0, 63);
+  // Агент на связи — значит, сервер рабочий, даже если прошлая установка
+  // (например, переустановка по SSH без ключа) упала.
+  if (s.status === "waiting" || s.status === "error") {
+    patch.status = "ready";
+    patch.installError = null;
+  }
+  if (Object.keys(patch).length > 0) await db.update(schema.servers).set(patch).where(eq(schema.servers.id, serverId));
+}
+
 /** Переустановка агента ключом организации (пароль больше не нужен). */
-export async function reinstallServer(id: string, opts?: { installTraefik?: boolean; acmeEmail?: string }): Promise<ServerDetail> {
+export async function reinstallServer(
+  id: string,
+  opts?: { installTraefik?: boolean; acmeEmail?: string; host?: string; password?: string },
+  fallbackEmail = "",
+): Promise<ServerDetail> {
   const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, id) });
   if (!s) throw new ServerError("Unknown server", 404);
   if (s.status === "installing") throw new ServerError("Install is already running", 409);
-  await db.update(schema.servers).set({ status: "installing", installLog: "", installError: null }).where(eq(schema.servers.id, id));
+  // Запасной путь со страницы ожидания: нет терминала — даём адрес и пароль,
+  // и панель ставит агента сама по SSH.
+  const patch: Partial<typeof schema.servers.$inferInsert> = { status: "installing", installLog: "", installError: null };
+  if (opts?.host) {
+    const t = parseTarget(opts.host);
+    if (!HOST_RE.test(t.host)) throw new ServerError("Host must be an IP address or hostname");
+    patch.host = t.host;
+    if (t.user) patch.sshUser = t.user;
+    if (t.port) patch.sshPort = t.port;
+  } else if (!s.host) {
+    throw new ServerError("Server address is required");
+  }
+  await db.update(schema.servers).set(patch).where(eq(schema.servers.id, id));
   startInstall(id, {
-    password: null,
-    installTraefik: opts?.installTraefik ?? false,
-    acmeEmail: (opts?.acmeEmail || process.env.ACME_EMAIL || "").trim(),
+    password: opts?.password || null,
+    installTraefik: opts?.installTraefik ?? "auto",
+    acmeEmail: (opts?.acmeEmail || process.env.ACME_EMAIL || fallbackEmail || "").trim(),
     databaseUrl: null,
   });
   return (await getServer(id))!;
@@ -293,4 +410,64 @@ function sshRun(
         readyTimeout: 20_000,
       });
   });
+}
+
+// ---------- кто держит 80/443 (agent/app/proxy.py) ----------
+
+export type ProxyHolder = { type: "container" | "host"; name: string; image?: string; networks?: string[] };
+export type ProxyState = {
+  ok: boolean;
+  kind: "traefik" | "other" | "none";
+  holder: ProxyHolder | null;
+  /** Что сделает кнопка: подключить свой Traefik к edge, заменить чужой прокси, поставить Traefik; null — только руками. */
+  action: "attach" | "replace" | "install" | null;
+};
+export type AgentJob = { id: string; status: "queued" | "running" | "succeeded" | "failed"; lines: string[]; line_count: number; error: string | null };
+
+async function serverAgent(id: string) {
+  const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, id) });
+  if (!s) throw new ServerError("Unknown server", 404);
+  return agentRef(s);
+}
+
+export async function serverProxyState(id: string): Promise<ProxyState> {
+  return agentRequest<ProxyState>(await serverAgent(id), "/proxy");
+}
+
+/** Починить 80/443 одной кнопкой; compose Traefik — тот же, что ставит установка. */
+export async function fixServerProxy(id: string, fallbackEmail = ""): Promise<AgentJob> {
+  const email = (process.env.ACME_EMAIL || fallbackEmail || "").trim();
+  return agentRequest<AgentJob>(await serverAgent(id), "/jobs/proxy", {
+    method: "POST",
+    body: { traefik_compose: traefikComposeYaml(email) },
+  });
+}
+
+export async function serverJob(id: string, jobId: string, since = 0): Promise<AgentJob> {
+  if (!/^[0-9a-f]{32}$/.test(jobId)) throw new ServerError("Bad job id");
+  return agentRequest<AgentJob>(await serverAgent(id), `/jobs/${jobId}?since=${since}`);
+}
+
+// ---------- удаление ----------
+
+/**
+ * Убрать сервер из панели. Пока на нём есть проекты или базы — отказ со
+ * списком: сначала перенести или удалить их. Агент на машине не трогаем
+ * (он может обслуживать живой прод) — он просто перестаёт проходить
+ * проверку токена в relay; как снять его руками, панель подсказывает.
+ */
+export async function deleteServer(id: string): Promise<void> {
+  const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, id) });
+  if (!s) throw new ServerError("Unknown server", 404);
+  const [projects, databases] = await Promise.all([
+    db.select({ name: schema.projects.name }).from(schema.projects).where(eq(schema.projects.serverId, id)),
+    db.select({ name: schema.databases.name }).from(schema.databases).where(eq(schema.databases.serverId, id)),
+  ]);
+  if (projects.length > 0) {
+    throw new ServerError(`Projects still run on this server: ${projects.map((p) => p.name).join(", ")}. Delete or move them first.`, 409);
+  }
+  if (databases.length > 0) {
+    throw new ServerError(`Databases still live on this server: ${databases.map((d) => d.name).join(", ")}. Remove them first.`, 409);
+  }
+  await db.delete(schema.servers).where(eq(schema.servers.id, id));
 }

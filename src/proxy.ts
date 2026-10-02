@@ -29,6 +29,7 @@ export async function proxy(req: NextRequest) {
     pathname === "/api/github/webhook" ||
     pathname === "/api/collect" ||
     pathname.startsWith("/api/hooks/") ||
+    pathname.startsWith("/api/install/") ||
     pathname.startsWith("/api/internal/");
   if (isPublic) return NextResponse.next();
 

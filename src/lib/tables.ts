@@ -174,6 +174,9 @@ export type ServiceView = {
   dockerfile: string | null;
   buildContext: string | null;
   autoDeploy: boolean;
+  deployMode: "image" | "script";
+  appDir: string | null;
+  deployCommand: string | null;
   webhookSecret: string | null;
   env: Record<string, string>;
   buildEnv: Record<string, string>;
@@ -196,6 +199,10 @@ export type ServiceInput = {
   dockerfile?: string | null;
   buildContext?: string | null;
   autoDeploy?: boolean;
+  workflow?: string | null;
+  deployMode?: "image" | "script";
+  appDir?: string | null;
+  deployCommand?: string | null;
   rotateWebhookSecret?: boolean;
 };
 

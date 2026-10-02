@@ -7,7 +7,13 @@ import "server-only";
  *
  * Скрипт идемпотентен: Docker ставится, если его нет; Traefik — если ещё не
  * стоит (свой Traefik клиента не трогаем); стек агента перезаписывается и
- * поднимается заново. Ключ организации добавляется в authorized_keys, чтобы
+ * поднимается заново.
+ *
+ * Как у Vercel, от человека нужны только адрес и пароль: остальное скрипт
+ * определяет на месте. Traefik в режиме `auto` ставится, только если порты
+ * 80/443 свободны (чужой прокси не ломаем). Postgres, если строку не дали,
+ * ищется среди контейнеров: учётка берётся из его POSTGRES_*, а агент
+ * подключается к его docker-сети через docker-compose.override.yml. Ключ организации добавляется в authorized_keys, чтобы
  * переустановка шла уже без пароля.
  *
  * Подставляемые значения проверяются вызывающим кодом (src/lib/servers.ts):
@@ -21,9 +27,9 @@ export type InstallParams = {
   installRoot: string; // каталог стека агента, обычно /opt/scalefield
   appsRoot: string; // корень compose-стеков проектов, обычно /opt/apps
   sshPublicKey: string;
-  installTraefik: boolean;
-  acmeEmail: string;
-  databaseUrl: string | null; // Postgres проекта на этом сервере для pg_stat_*
+  installTraefik: boolean | "auto"; // auto — только если 80/443 свободны
+  acmeEmail: string; // пусто — Let's Encrypt без email
+  databaseUrl: string | null; // Postgres для pg_stat_*; null — найти контейнер самому
 };
 
 export function traefikComposeYaml(acmeEmail: string): string {
@@ -42,8 +48,7 @@ services:
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
       - --entrypoints.websecure.address=:443
-      - --certificatesresolvers.le.acme.email=${acmeEmail}
-      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+${acmeEmail ? `      - --certificatesresolvers.le.acme.email=${acmeEmail}\n` : ""}      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
       - --certificatesresolvers.le.acme.tlschallenge=true
       - --accesslog=true
       - --accesslog.filepath=/var/log/traefik/access.log
@@ -121,6 +126,62 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 log() { echo "==> $*"; }
 
+# Percent-encoding для пароля в строке подключения.
+urlenc() {
+  local s="$1" out="" c i
+  for ((i = 0; i < \${#s}; i++)); do
+    c="\${s:i:1}"
+    case "$c" in
+      [a-zA-Z0-9.~_-]) out+="$c" ;;
+      *) printf -v c '%%%02X' "'$c"; out+="$c" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# Postgres на сервере: первый контейнер на образе postgres/pgvector/postgis/
+# timescale. Строка подключения — из его POSTGRES_*, агент подключается к его
+# docker-сети (override рядом с compose агента), хост — имя контейнера.
+detect_postgres() {
+  local dbs db envs user pass name net
+  dbs="$(docker ps --format '{{.Names}} {{.Image}}' | awk 'tolower($2) ~ /(postgres|pgvector|postgis|timescale)/ {print $1}')"
+  if [ -z "$dbs" ]; then
+    log "No Postgres container found — the Database section stays empty (pass a Postgres URL under Advanced)"
+    return 0
+  fi
+  db="$(echo "$dbs" | head -n1)"
+  if [ "$(echo "$dbs" | wc -l)" -gt 1 ]; then
+    log "Several Postgres containers: $(echo $dbs) — using $db"
+  fi
+  envs="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$db")"
+  user="$(echo "$envs" | sed -n 's/^POSTGRES_USER=//p' | head -n1)"; user="\${user:-postgres}"
+  pass="$(echo "$envs" | sed -n 's/^POSTGRES_PASSWORD=//p' | head -n1)"
+  name="$(echo "$envs" | sed -n 's/^POSTGRES_DB=//p' | head -n1)"; name="\${name:-$user}"
+  if [ -z "$pass" ] && echo "$envs" | grep -q '^POSTGRES_PASSWORD_FILE='; then
+    log "Postgres $db keeps its password in a file — pass the Postgres URL under Advanced"
+    return 0
+  fi
+  net="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' "$db" | grep -vxE 'bridge|host|none|' | head -n1 || true)"
+  if [ -z "$net" ]; then
+    log "Postgres $db is not on a user-defined docker network — the agent cannot reach it, skipping"
+    return 0
+  fi
+  log "Found Postgres $db (database $name, network $net)"
+  umask 077
+  echo "STATUS_DATABASE_URL=postgresql://$(urlenc "$user")\${pass:+:$(urlenc "$pass")}@$db:5432/$(urlenc "$name")" >> '${p.installRoot}/.env'
+  umask 022
+  cat > '${p.installRoot}/docker-compose.override.yml' <<SCALEFIELD_EOF
+# Найдено установкой: агент подключается к сети Postgres этого сервера.
+services:
+  agent:
+    networks: [edge, postgres]
+networks:
+  postgres:
+    name: $net
+    external: true
+SCALEFIELD_EOF
+}
+
 main() {
   log "Scalefield agent install on $(hostname) ($(uname -sm))"
   if [ "$(id -u)" != "0" ]; then
@@ -145,16 +206,32 @@ main() {
     docker network create edge >/dev/null
   fi
 
-  if [ '${p.installTraefik ? "1" : "0"}' = "1" ]; then
-    if [ -f '${p.appsRoot}/traefik/docker-compose.yml' ]; then
-      log "Traefik is already installed in ${p.appsRoot}/traefik — keeping it"
-    else
-      log "Installing Traefik (Let's Encrypt, JSON access log)"
-      mkdir -p '${p.appsRoot}/traefik/letsencrypt'
-      cat > '${p.appsRoot}/traefik/docker-compose.yml' <<'SCALEFIELD_EOF'
-${traefikComposeYaml(p.acmeEmail)}SCALEFIELD_EOF
-      docker compose -f '${p.appsRoot}/traefik/docker-compose.yml' up -d
+  TRAEFIK_MODE='${p.installTraefik === "auto" ? "auto" : p.installTraefik ? "1" : "0"}'
+  if [ -f '${p.appsRoot}/traefik/docker-compose.yml' ]; then
+    log "Traefik is already installed in ${p.appsRoot}/traefik — keeping it"
+    TRAEFIK_MODE=0
+  elif [ "$TRAEFIK_MODE" = "auto" ]; then
+    # Кто-то уже слушает 80/443 (свой Traefik, nginx, Caddy) — не мешаем ему.
+    PROXY="$(docker ps --format '{{.Names}} {{.Ports}}' | grep -E ':(80|443)->' | awk '{print $1}' | head -n1 || true)"
+    if [ -z "$PROXY" ] && command -v ss >/dev/null 2>&1 && [ -n "$(ss -ltnH '( sport = :80 or sport = :443 )' 2>/dev/null)" ]; then
+      PROXY="a process on the host"
     fi
+    if [ -n "$PROXY" ]; then
+      log "Ports 80/443 are taken by $PROXY — keeping the existing reverse proxy, Traefik is not installed"
+      if docker inspect "$PROXY" >/dev/null 2>&1 && ! docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$PROXY" | grep -qw edge; then
+        log "WARNING: $PROXY is not attached to the docker network edge — project domains need it there (docker network connect edge $PROXY)"
+      fi
+      TRAEFIK_MODE=0
+    else
+      TRAEFIK_MODE=1
+    fi
+  fi
+  if [ "$TRAEFIK_MODE" = "1" ]; then
+    log "Installing Traefik (Let's Encrypt, JSON access log)"
+    mkdir -p '${p.appsRoot}/traefik/letsencrypt'
+    cat > '${p.appsRoot}/traefik/docker-compose.yml' <<'SCALEFIELD_EOF'
+${traefikComposeYaml(p.acmeEmail)}SCALEFIELD_EOF
+    docker compose -f '${p.appsRoot}/traefik/docker-compose.yml' up -d
   fi
 
   log "Writing the agent stack to ${p.installRoot}"
@@ -165,6 +242,11 @@ ${agentComposeYaml(p)}SCALEFIELD_EOF
 ${envLines}
 SCALEFIELD_EOF
   umask 022
+
+  rm -f '${p.installRoot}/docker-compose.override.yml'
+  if [ '${p.databaseUrl ? "1" : "0"}' = "0" ]; then
+    detect_postgres
+  fi
 
   log "Starting the agent (${p.agentImage})"
   cd '${p.installRoot}'
