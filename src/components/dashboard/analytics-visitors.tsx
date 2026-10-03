@@ -166,17 +166,20 @@ function RankedList({ items, valueLabel }: { items: { name: string; count: numbe
   const max = Math.max(...items.map((i) => i.count));
   return (
     <div className="space-y-1.5">
-      {items.map((i) => (
-        <div key={i.name} className="relative flex items-center justify-between overflow-hidden rounded-md px-2 py-1.5 text-sm">
-          <div
-            className="absolute inset-y-0 left-0 bg-muted"
-            style={{ width: `${max ? (i.count / max) * 100 : 0}%` }}
-            aria-hidden
-          />
-          <span className="relative truncate">{i.name}</span>
-          <span className="relative shrink-0 pl-3 font-mono text-xs text-muted-foreground">{fmtNum(i.count)}</span>
-        </div>
-      ))}
+      {/* 7 rows (32px each + 6px gaps) = 260px, the rest scrolls inside the card */}
+      <div className="max-h-[260px] space-y-1.5 overflow-y-auto">
+        {items.map((i) => (
+          <div key={i.name} className="relative flex items-center justify-between overflow-hidden rounded-md px-2 py-1.5 text-sm">
+            <div
+              className="absolute inset-y-0 left-0 bg-muted"
+              style={{ width: `${max ? (i.count / max) * 100 : 0}%` }}
+              aria-hidden
+            />
+            <span className="relative truncate">{i.name}</span>
+            <span className="relative shrink-0 pl-3 font-mono text-xs text-muted-foreground">{fmtNum(i.count)}</span>
+          </div>
+        ))}
+      </div>
       <div className="flex justify-end pr-2 text-[10px] uppercase text-muted-foreground">{valueLabel}</div>
     </div>
   );

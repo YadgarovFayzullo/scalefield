@@ -397,9 +397,10 @@ export function TopEndpoints({ endpoints }: { endpoints: NonNullable<ApiData["to
         {endpoints.length === 0 ? (
           <div className="px-4 py-6 text-sm text-muted-foreground text-center">No requests in the current window</div>
         ) : (
-          <div className="overflow-x-auto">
+          /* header 32px + 10 rows × 37px = 402px; the rest scrolls under the sticky header */
+          <div className="max-h-[402px] overflow-auto">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 z-10 bg-background">
                 <tr className="text-xs text-muted-foreground uppercase tracking-wide bg-muted/30">
                   <th className="text-left font-medium px-4 py-2">Path</th>
                   <th className="text-right font-medium px-4 py-2">Requests</th>
