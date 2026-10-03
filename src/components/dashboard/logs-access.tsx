@@ -5,6 +5,9 @@
  * on the server (`warn` = 4xx+5xx, `error` = 5xx); host is an exact match.
  */
 import * as React from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useMetric, fmtBytes, fmtMs, fmtTime, type AccessLogItem, type AccessLogsData } from "@/lib/status";
 import {
@@ -27,6 +30,7 @@ const ALL_HOSTS = "all";
 const ALL_ITEM = { value: ALL_HOSTS, label: "All hosts" };
 
 const LIMIT = 300;
+const PAGE_SIZE = 20;
 
 export function LogsAccessView({
   level,
@@ -69,6 +73,13 @@ export function LogsAccessView({
     () => (q ? items.filter((it) => it.path.toLowerCase().includes(q)) : items),
     [items, q]
   );
+
+  // Пагинация на клиенте по загруженным LIMIT записям; смена фильтров — на первую страницу.
+  const [page, setPage] = React.useState(0);
+  React.useEffect(() => setPage(0), [level, host, q]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const current = Math.min(page, pageCount - 1);
+  const pageItems = filtered.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
 
   return (
     <>
@@ -118,10 +129,35 @@ export function LogsAccessView({
                 <span className="text-right">Duration</span>
                 <span>Host</span>
               </div>
-              {filtered.map((it) => (
+              {pageItems.map((it) => (
                 <AccessRow key={it.id} item={it} active={selected?.id === it.id} onSelect={setSelected} />
               ))}
-              {items.length >= LIMIT && (
+              {pageCount > 1 && (
+                <div className="flex items-center justify-center gap-3 p-3 text-xs text-muted-foreground">
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label="Previous page"
+                    disabled={current === 0}
+                    onClick={() => setPage(current - 1)}
+                  >
+                    <HugeiconsIcon icon={ArrowLeft01Icon} className="h-4 w-4" />
+                  </Button>
+                  <span className="tabular-nums">
+                    {current * PAGE_SIZE + 1}–{current * PAGE_SIZE + pageItems.length} of {filtered.length}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label="Next page"
+                    disabled={current >= pageCount - 1}
+                    onClick={() => setPage(current + 1)}
+                  >
+                    <HugeiconsIcon icon={ArrowRight01Icon} className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+              {items.length >= LIMIT && current === pageCount - 1 && (
                 <div className="p-3 text-center text-xs text-muted-foreground">
                   Showing the latest {LIMIT} requests. Narrow the level or host to see older ones.
                 </div>
