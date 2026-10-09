@@ -43,3 +43,16 @@ export function classifyUa(ua: string | null | undefined): UaInfo {
 
   return { device, browser, os };
 }
+
+/**
+ * Служебные разделы сайта — админка (под любым префиксом локали) и панель
+ * Telegram: посещения редакторов, не аудитория. Их не пишет ни /api/collect,
+ * ни разбор лога агента (agent/app/collectors/visitors.py — тот же шаблон,
+ * синхронизировать вместе со списком ботов). Сам сайт маячок оттуда тоже не
+ * шлёт; здесь — страховка от закэшированных у редакторов старых бандлов.
+ */
+const SERVICE_PATH = /^\/(?:[a-z]{2}\/)?(?:admin|tg)(?:\/|$)/;
+
+export function isServicePath(path: string): boolean {
+  return SERVICE_PATH.test(path.split("?", 1)[0]);
+}

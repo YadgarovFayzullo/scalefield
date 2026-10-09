@@ -36,6 +36,9 @@ _STATIC_EXT = (
     ".woff", ".woff2", ".ttf", ".json", ".xml", ".txt", ".webmanifest", ".avif",
 )
 _EXCLUDE_PREFIX = ("/api/", "/_next/", "/pdf/", "/favicon", "/robots.txt", "/sitemap", "/og.")
+# Служебные разделы — админка под любым префиксом локали и панель Telegram:
+# это редакторы, а не аудитория. Тот же шаблон — isServicePath в src/lib/ua.ts.
+_SERVICE_PATH = re.compile(r"^/(?:[a-z]{2}/)?(?:admin|tg)(?:/|$)")
 
 
 def _is_page_view(r: dict) -> bool:
@@ -43,6 +46,8 @@ def _is_page_view(r: dict) -> bool:
         return False
     path = r["path"].split("?", 1)[0]
     if path.startswith(_EXCLUDE_PREFIX):
+        return False
+    if _SERVICE_PATH.match(path):
         return False
     if path.endswith(_STATIC_EXT):
         return False

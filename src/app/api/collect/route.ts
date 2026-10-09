@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/db";
 import { getProjectByDomain } from "@/lib/services";
-import { classifyUa, isBotUa } from "@/lib/ua";
+import { classifyUa, isBotUa, isServicePath } from "@/lib/ua";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -99,6 +99,7 @@ export async function POST(req: NextRequest) {
   }
   const path = typeof body.path === "string" ? body.path.slice(0, 500) : null;
   if (!path) return new NextResponse(null, { status: 204, headers });
+  if (isServicePath(path)) return new NextResponse(null, { status: 204, headers });
 
   const project = await getProjectByDomain(host);
   if (!project) return new NextResponse(null, { status: 204, headers });
