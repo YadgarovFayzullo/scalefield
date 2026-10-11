@@ -5,7 +5,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ProjectProvider, type ProjectContextValue } from "@/lib/project-context";
-import { getProject, listProjects } from "@/lib/projects";
+import { getProject, listProjects, projectHasDatabase } from "@/lib/projects";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +25,9 @@ export default async function ProjectLayout({
   const [project, all] = await Promise.all([getProject(slug), listProjects(user.orgIds)]);
   // Чужой проект — как несуществующий (proxy.ts уже отсёк, это вторая линия).
   if (!project || !user.orgIds.includes(project.orgId)) notFound();
+  // Разделы базы в сайдбаре — только у проекта с привязанной базой: у фронта
+  // без неё Table Editor и SQL Editor показывать нечего.
+  const hasDatabase = await projectHasDatabase(project.id);
 
   const domains = Array.from(new Set(project.services.flatMap((s) => s.domains.map((d) => d.hostname))));
   const ctx: ProjectContextValue = {
@@ -33,6 +36,7 @@ export default async function ProjectLayout({
     serverName: project.server?.name ?? null,
     contentMetrics: Boolean(project.settings.contentMetrics),
     domains,
+    hasDatabase,
     apiBase: `/api/projects/${project.slug}`,
     pathBase: `/p/${project.slug}`,
   };
@@ -41,7 +45,7 @@ export default async function ProjectLayout({
   return (
     <ProjectProvider value={ctx}>
       <SidebarProvider>
-        <AppSidebar project={{ slug: project.slug, name: project.name }} projects={switcher} />
+        <AppSidebar project={{ slug: project.slug, name: project.name }} projects={switcher} hasDatabase={hasDatabase} />
         <div className="flex-1 flex flex-col bg-background p-2">
           <SidebarInset className="border border-border/90">
             <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-6 py-2 bg-sidebar border-b border-border rounded-t-xl">

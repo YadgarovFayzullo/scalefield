@@ -27,23 +27,31 @@ import Stack3Icon from "@/components/ui/stack-3-icon";
 import UnorderedListIcon from "@/components/ui/unordered-list-icon";
 import CodeIcon from "@/components/ui/code-icon";
 import GearIcon from "@/components/ui/gear-icon";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type AnimatedIcon = React.ForwardRefExoticComponent<AnimatedIconProps & React.RefAttributes<AnimatedIconHandle>>;
 
 // Разделы проекта; href относительно /p/<slug>. Иконки — анимированные
 // (itshover.com): анимация запускается наведением на всю строку меню.
-const navItems: { title: string; href: string; icon: AnimatedIcon }[] = [
+type Item = { title: string; href: string; icon: AnimatedIcon };
+const navItems: Item[] = [
   { title: "Overview", href: "", icon: LayoutDashboardIcon },
   { title: "Services", href: "/services", icon: PlugConnectedIcon },
   { title: "Deployments", href: "/deployments", icon: RocketIcon },
   { title: "Monitoring", href: "/monitoring", icon: GaugeIcon },
   { title: "Analytics", href: "/analytics", icon: ChartLineIcon },
   { title: "Logs", href: "/logs", icon: FileDescriptionIcon },
+];
+// Разделы базы — только когда она привязана к проекту (как у Supabase проект
+// без базы не показывает редактор таблиц). Без базы — один пункт «Connect
+// database», ведущий на ту же страницу с формой подключения.
+const databaseItems: Item[] = [
   { title: "Database", href: "/database", icon: Stack3Icon },
   { title: "Table Editor", href: "/tables", icon: UnorderedListIcon },
   { title: "SQL Editor", href: "/sql", icon: CodeIcon },
-  { title: "Settings", href: "/settings", icon: GearIcon },
 ];
+const connectDatabaseItem: Item = { title: "Connect database", href: "/database", icon: Stack3Icon };
+const settingsItem: Item = { title: "Settings", href: "/settings", icon: GearIcon };
 
 function NavItem({ title, href, icon: Icon, isActive }: { title: string; href: string; icon: AnimatedIcon; isActive: boolean }) {
   const iconRef = React.useRef<AnimatedIconHandle>(null);
@@ -68,10 +76,11 @@ function NavItem({ title, href, icon: Icon, isActive }: { title: string; href: s
 
 type ProjectRef = { slug: string; name: string };
 
-export function AppSidebar({ project, projects }: { project: ProjectRef; projects: ProjectRef[] }) {
+export function AppSidebar({ project, projects, hasDatabase }: { project: ProjectRef; projects: ProjectRef[]; hasDatabase: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const base = `/p/${project.slug}`;
+  const items: Item[] = [...navItems, ...(hasDatabase ? databaseItems : [connectDatabaseItem]), settingsItem];
 
   return (
     <Sidebar collapsible="icon">
@@ -92,25 +101,25 @@ export function AppSidebar({ project, projects }: { project: ProjectRef; project
           </div>
         </Link>
         {projects.length > 1 && (
-          <select
-            aria-label="Project"
-            className="mt-3 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-            value={project.slug}
-            onChange={(e) => router.push(`/p/${e.target.value}`)}
-          >
-            {projects.map((p) => (
-              <option key={p.slug} value={p.slug}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <Select value={project.slug} onValueChange={(slug) => slug && slug !== project.slug && router.push(`/p/${slug}`)}>
+            <SelectTrigger aria-label="Project" size="sm" className="mt-3 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {projects.map((p) => (
+                <SelectItem key={p.slug} value={p.slug}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
       </SidebarHeader>
       <SidebarContent className="px-2">
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu className="gap-1.5">
-              {navItems.map((item) => {
+              {items.map((item) => {
                 const href = base + item.href;
                 return <NavItem key={href} title={item.title} href={href} icon={item.icon} isActive={pathname === href} />;
               })}

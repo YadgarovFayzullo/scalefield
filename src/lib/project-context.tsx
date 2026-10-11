@@ -12,6 +12,8 @@ export type ProjectContextValue = {
   serverName: string | null;
   contentMetrics: boolean;
   domains: string[];
+  /** У проекта есть привязанная база (разделы Database/Table Editor/SQL Editor). */
+  hasDatabase: boolean;
   /** База API проекта, например `/api/projects/researcher-uz`. */
   apiBase: string;
   /** База страниц проекта, например `/p/researcher-uz`. */

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { DatabaseIcon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ export const NO_DATABASE = "Project has no database registered";
  */
 export function ConnectDatabase({ onConnected }: { onConnected: () => void }) {
   const { apiBase } = useProject();
+  const router = useRouter();
   const [url, setUrl] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -29,6 +31,9 @@ export function ConnectDatabase({ onConnected }: { onConnected: () => void }) {
     setError(null);
     try {
       await api(`${apiBase}/database`, { method: "PUT", body: JSON.stringify({ url }) });
+      // Сайдбар рисует layout на сервере: после привязки у проекта появляются
+      // Table Editor и SQL Editor — перерисовываем его.
+      router.refresh();
       onConnected();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

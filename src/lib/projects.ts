@@ -40,6 +40,12 @@ export async function getProject(slug: string): Promise<ProjectSummary | null> {
   return (row as ProjectSummary | undefined) ?? null;
 }
 
+/** Есть ли у проекта привязанная база — от этого зависит набор разделов в сайдбаре. */
+export async function projectHasDatabase(projectId: string): Promise<boolean> {
+  const [row] = await db.select({ id: schema.databases.id }).from(schema.databases).where(eq(schema.databases.projectId, projectId)).limit(1);
+  return Boolean(row);
+}
+
 /** Проект и ссылка на его агента (`AgentRef`) — только для серверного кода, в браузер не отдавать. */
 export async function getProjectAgent(slug: string): Promise<({ project: Project } & AgentRef) | null> {
   const project = await db.query.projects.findFirst({ where: eq(schema.projects.slug, slug) });
