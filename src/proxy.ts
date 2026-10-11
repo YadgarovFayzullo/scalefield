@@ -28,6 +28,8 @@ export async function proxy(req: NextRequest) {
     pathname === "/api/auth/github/callback" ||
     pathname === "/api/github/webhook" ||
     pathname === "/api/collect" ||
+    // Универсальный трекер аналитики (public/script.js) — его грузят чужие сайты.
+    pathname === "/script.js" ||
     pathname.startsWith("/api/hooks/") ||
     pathname.startsWith("/api/install/") ||
     pathname.startsWith("/api/internal/");

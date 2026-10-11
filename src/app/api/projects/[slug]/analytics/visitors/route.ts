@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { projectAllowed } from "@/lib/auth";
-import { getProjectAgent } from "@/lib/projects";
-import { AgentError, agentRequest } from "@/lib/agent";
+import { getProject } from "@/lib/projects";
 import { hasTrackedViews, visitorsFromDb } from "@/lib/visitors-db";
-import { listServices } from "@/lib/services";
 import type { VisitorsData } from "@/lib/status";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Посетители проекта: предпочитает реальные события клиентского трекера
- * (`page_views`, см. src/app/api/collect) — они точнее и ловят SPA-переходы;
- * если трекер ещё не стоит на сайте, честно падает на разбор лога прокси
- * агента (`/status/visitors`), который работал и раньше. Источник помечен
- * в ответе (`source`), чтобы страница показала подсказку «поставь трекер»
- * только когда это действительно так, а не всегда.
+ * Посетители проекта — только из событий трекера (`page_views`, см.
+ * public/script.js и src/app/api/collect), как у Vercel Web Analytics.
+ *
+ * Разбора access-лога прокси здесь больше нет: он привязывал аналитику к
+ * Traefik и серверу, на котором стоит агент, и не видел SPA-переходов. Нет
+ * событий — `configured: false`, и страница показывает строку установки
+ * скрипта для этого проекта.
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   if (!(await projectAllowed(req, params))) {
@@ -24,35 +23,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   const { slug } = await params;
   const days = Math.min(30, Math.max(1, Number(req.nextUrl.searchParams.get("days")) || 7));
 
-  let agent: Awaited<ReturnType<typeof getProjectAgent>>;
+  let project: Awaited<ReturnType<typeof getProject>>;
   try {
-    agent = await getProjectAgent(slug);
+    project = await getProject(slug);
   } catch (e) {
     return NextResponse.json({ error: "Control-plane недоступен", detail: String(e) }, { status: 502 });
   }
-  if (!agent) return NextResponse.json({ error: "Unknown project" }, { status: 404 });
+  if (!project) return NextResponse.json({ error: "Unknown project" }, { status: 404 });
 
-  if (await hasTrackedViews(agent.project.id)) {
-    const data = await visitorsFromDb(agent.project.id, days);
-    return NextResponse.json({ ...data, source: "script" });
+  if (!(await hasTrackedViews(project.id))) {
+    return NextResponse.json({ configured: false, window_days: days } satisfies VisitorsData);
   }
-
-  // На общем сервере трафик режем по доменам проекта — тот же принцип, что
-  // у общего прокси /status/[...path] для этого же ключа.
-  // Без доменов разбор лога отдал бы трафик всего сервера — чужих проектов.
-  const domains = (await listServices(agent.project.id)).flatMap((s) => s.domains);
-  if (domains.length === 0) {
-    return NextResponse.json(
-      { error: "Project has no domains — add one in Services, or install the <Analytics /> tracker." },
-      { status: 404 },
-    );
-  }
-  const hostsQs = `&hosts=${encodeURIComponent(domains.join(","))}`;
-  try {
-    const body = await agentRequest<VisitorsData>(agent, `/status/visitors?days=${days}${hostsQs}`, { timeoutMs: 20000 });
-    return NextResponse.json({ ...body, source: "logs" });
-  } catch (e) {
-    const status = e instanceof AgentError ? e.status : 502;
-    return NextResponse.json({ error: "Агент недоступен", detail: e instanceof Error ? e.message : String(e) }, { status });
-  }
+  return NextResponse.json(await visitorsFromDb(project.id, days));
 }

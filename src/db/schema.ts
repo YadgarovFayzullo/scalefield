@@ -317,11 +317,10 @@ export const buckets = pgTable("buckets", {
   createdAt: createdAt(),
 });
 
-// События просмотра страницы от клиентского трекера (`<Analytics />`,
-// см. scalefield-analytics.tsx) — POST /api/collect с сайта проекта. В
-// отличие от разбора access-лога прокси (agent/status/visitors), ловит
-// клиентские SPA-переходы и не требует доступа к логам прокси вообще:
-// проект просто ставит компонент в layout. `visitorHash` — не IP, а его
+// События просмотра страницы от трекера — универсального `public/script.js`
+// (одна строка на любом сайте) или React-компонента scalefield-analytics.tsx —
+// через POST /api/collect. Единственный источник аналитики посетителей: от
+// прокси и сервера проекта не зависит. `visitorHash` — не IP, а его
 // необратимый хеш (соль + IP + UA + сутки), чтобы считать уникальных
 // посетителей, не храня ничего похожего на личные данные.
 export const pageViews = pgTable(

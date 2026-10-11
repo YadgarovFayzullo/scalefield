@@ -7,17 +7,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  CodeIcon,
   ComputerIcon,
+  Copy01Icon,
   EyeIcon,
-  InformationCircleIcon,
-  Link01Icon,
   PercentIcon,
   SmartPhone01Icon,
   Tablet01Icon,
+  Tick02Icon,
   UserMultipleIcon,
 } from "@hugeicons/core-free-icons";
 import { fmtNum, fmtPct, type VisitorsData } from "@/lib/status";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 // ---------- stat row ----------
 
@@ -207,18 +209,7 @@ export function ReferrersCard({ data }: { data: VisitorsData }) {
         <span className="text-xs text-muted-foreground">Visits</span>
       </CardHeader>
       <CardContent>
-        {data.referrer_capture_available === false ? (
-          <div className="flex items-start gap-2 py-2 text-xs text-muted-foreground">
-            <HugeiconsIcon icon={InformationCircleIcon} className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              Referrer capture isn&apos;t enabled on this server&apos;s proxy yet — every row shows as
-              &quot;Direct&quot;. Add the <code className="font-mono">Referer</code> header to the access log to
-              turn this on.
-            </span>
-          </div>
-        ) : (
-          <RankedList items={(data.referrers ?? []).map((r) => ({ name: r.referrer, count: r.count }))} valueLabel="visits" />
-        )}
+        <RankedList items={(data.referrers ?? []).map((r) => ({ name: r.referrer, count: r.count }))} valueLabel="visits" />
       </CardContent>
     </Card>
   );
@@ -252,18 +243,53 @@ export function DeviceIcon(name: string): typeof ComputerIcon {
   return ComputerIcon;
 }
 
-export function VisitorsNotConfigured() {
+/**
+ * Аналитика ещё не установлена: одна строка для любого сайта — как у Vercel
+ * Web Analytics, только без привязки к фреймворку и хостингу. Адрес скрипта —
+ * текущий origin панели, `data-site` — слаг этого проекта.
+ */
+export function VisitorsNotConfigured({ site }: { site: string }) {
+  const [origin, setOrigin] = React.useState("https://scalefield.uz");
+  const [copied, setCopied] = React.useState(false);
+  React.useEffect(() => setOrigin(window.location.origin), []);
+  const snippet = `<script defer src="${origin}/script.js" data-site="${site}"></script>`;
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(snippet);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* буфер обмена недоступен — строку видно и так */
+    }
+  };
+
   return (
     <Card className="border-border">
-      <CardContent className="flex items-start gap-3 py-6">
-        <HugeiconsIcon icon={Link01Icon} className="mt-0.5 h-5 w-5 text-muted-foreground" />
-        <div>
-          <p className="mb-1 text-sm font-medium">Visitor analytics not configured</p>
-          <p className="text-sm text-muted-foreground">
-            Set up the proxy&apos;s JSON access log (<code className="font-mono">CADDY_ACCESS_LOG</code> on the
-            agent) to see visitors, page views and referrers here.
-          </p>
+      <CardContent className="space-y-4 py-6">
+        <div className="flex items-start gap-3">
+          <HugeiconsIcon icon={CodeIcon} className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+          <div>
+            <p className="mb-1 text-sm font-medium">Add Scalefield Analytics to your site</p>
+            <p className="text-sm text-muted-foreground">
+              Paste this line into the <code className="font-mono">&lt;head&gt;</code> of every page. It works with
+              any framework or plain HTML, tracks client-side route changes, and needs no cookies. Visitors show up
+              here within a minute of the first page view.
+            </p>
+          </div>
         </div>
+        <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+          <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs">{snippet}</code>
+          <Button size="sm" variant="outline" className="shrink-0 gap-1.5 cursor-pointer" onClick={copy}>
+            <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} className="h-3.5 w-3.5" />
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Next.js: put it in the root layout via <code className="font-mono">next/script</code> with{" "}
+          <code className="font-mono">strategy=&quot;afterInteractive&quot;</code>. To skip private sections add{" "}
+          <code className="font-mono">data-exclude=&quot;/admin/**&quot;</code>.
+        </p>
       </CardContent>
     </Card>
   );

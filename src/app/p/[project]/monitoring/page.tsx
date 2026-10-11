@@ -20,10 +20,15 @@ import { MonitoringServices } from "@/components/dashboard/monitoring-services";
 import { MonitoringHost } from "@/components/dashboard/monitoring-host";
 import { MonitoringIncidents } from "@/components/dashboard/monitoring-incidents";
 import { MonitoringTraffic } from "@/components/dashboard/monitoring-traffic";
+import { HostsList, TopEndpoints } from "@/components/dashboard/monitoring-endpoints";
 
 /**
- * Monitoring page: live host, Docker services and traffic errors.
+ * Monitoring page: live host, Docker services and server traffic.
  * Data: /api/status/server (5s), /api/status/api (30s), /api/status/summary (10s).
+ *
+ * Traffic here is the proxy's access log on the project's server (requests,
+ * errors, endpoints, hosts) — infrastructure, not audience. Visitor analytics
+ * lives on /analytics and comes only from the Scalefield script.
  */
 export default function MonitoringPage() {
   const server = useMetric<ServerData>("server", 5000);
@@ -173,7 +178,13 @@ export default function MonitoringPage() {
         ) : api.error && !api.data ? (
           <ErrorCard title="Traffic log unavailable" message={api.error} onRetry={api.refresh} />
         ) : api.data?.configured ? (
-          <MonitoringTraffic api={api.data} />
+          <div className="space-y-4">
+            <MonitoringTraffic api={api.data} />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <TopEndpoints endpoints={api.data.top_endpoints ?? []} />
+              <HostsList hosts={api.data.by_host ?? []} />
+            </div>
+          </div>
         ) : (
           <div className="border-t border-b border-border py-6 text-sm text-muted-foreground">traffic log not configured</div>
         )}

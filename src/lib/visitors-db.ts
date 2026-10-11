@@ -4,10 +4,9 @@ import { db, schema } from "@/db";
 import type { VisitorsData } from "@/lib/status";
 
 /**
- * Посетители из событий клиентского трекера (`page_views`) — точнее, чем
- * разбор лога прокси (agent/status/visitors): ловит клиентские SPA-переходы
- * и не зависит от того, какой заголовок пишет Traefik. Форма ответа —
- * ровно `VisitorsData`, чтобы страница `/analytics` не различала источник.
+ * Посетители из событий трекера (`page_views`: public/script.js или
+ * React-компонент) — единственный источник аналитики посетителей. От прокси
+ * и сервера проекта не зависит: сайт может жить где угодно.
  */
 
 type Row = { path: string; referrer: string | null; visitorHash: string; device: string | null; browser: string | null; os: string | null; createdAt: Date };
@@ -29,6 +28,10 @@ function referrerHost(raw: string | null): string {
 
 function aggregate(rows: Row[]) {
   const visitorViews = new Map<string, number>();
+  // Источник визита — referrer первого просмотра посетителя: при переходах
+  // внутри сайта каждый следующий просмотр нёс бы тот же внешний referrer
+  // (старый компонент) или адрес предыдущей страницы (script.js).
+  const entryReferrer = new Map<string, string | null>();
   const pages = new Map<string, { views: number; visitors: Set<string> }>();
   const referrers = new Map<string, number>();
   const devices = new Map<string, number>();
@@ -36,7 +39,9 @@ function aggregate(rows: Row[]) {
   const oses = new Map<string, number>();
   const daily = new Map<number, { visitors: Set<string>; views: number }>();
 
-  for (const r of rows) {
+  const ordered = [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  for (const r of ordered) {
+    if (!entryReferrer.has(r.visitorHash)) entryReferrer.set(r.visitorHash, r.referrer);
     visitorViews.set(r.visitorHash, (visitorViews.get(r.visitorHash) ?? 0) + 1);
     const page = pages.get(r.path) ?? { views: 0, visitors: new Set<string>() };
     page.views += 1;
@@ -45,13 +50,16 @@ function aggregate(rows: Row[]) {
     if (r.device) devices.set(r.device, (devices.get(r.device) ?? 0) + 1);
     if (r.browser) browsers.set(r.browser, (browsers.get(r.browser) ?? 0) + 1);
     if (r.os) oses.set(r.os, (oses.get(r.os) ?? 0) + 1);
-    const ref = referrerHost(r.referrer);
-    referrers.set(ref, (referrers.get(ref) ?? 0) + 1);
     const day = Math.floor(r.createdAt.getTime() / 86_400_000) * 86_400;
     const d = daily.get(day) ?? { visitors: new Set<string>(), views: 0 };
     d.visitors.add(r.visitorHash);
     d.views += 1;
     daily.set(day, d);
+  }
+
+  for (const raw of entryReferrer.values()) {
+    const ref = referrerHost(raw);
+    referrers.set(ref, (referrers.get(ref) ?? 0) + 1);
   }
 
   const visitors = visitorViews.size;
@@ -129,7 +137,6 @@ export async function visitorsFromDb(projectId: string, days: number): Promise<V
     series: curAgg.series,
     top_pages: curAgg.top_pages,
     referrers: curAgg.referrers,
-    referrer_capture_available: true,
     devices: curAgg.devices,
     browsers: curAgg.browsers,
     operating_systems: curAgg.operating_systems,

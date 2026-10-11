@@ -86,7 +86,6 @@ export async function getService(projectId: string, id: string): Promise<Service
   return view(rows[0], domains);
 }
 
-/** Для webhook: сервис по id вместе с проектом (без сессии — подпись проверяется секретом). */
 /** Проект-владелец домена — так публичный /api/collect узнаёт, чей это визит,
  * без токена в клиентском коде (тот же принцип, что у Vercel Analytics:
  * компонент ничего не настраивает, площадка узнаётся по адресу страницы). */
@@ -105,6 +104,39 @@ export async function getProjectByDomain(hostname: string): Promise<{ id: string
   return project ?? null;
 }
 
+/** Тот же хост с «www.» и без него — один сайт. */
+function sameSite(a: string, b: string): boolean {
+  const bare = (h: string) => h.toLowerCase().replace(/^www\./, "");
+  return bare(a) === bare(b);
+}
+
+/**
+ * Проект для публичного /api/collect. С `site` (атрибут `data-site`
+ * универсального скрипта) — по слагу, так трекер работает и на сайте, который
+ * Scalefield не деплоит и чьих доменов не знает. Если же домены у проекта
+ * заведены, маячок принимается только с них: иначе любой мог бы засорить
+ * чужую аналитику, подставив чужой слаг. Без `site` — по домену страницы.
+ */
+export async function resolveTrackedProject(
+  site: string | null,
+  host: string,
+): Promise<{ id: string; slug: string } | null> {
+  if (!site) return getProjectByDomain(host);
+  const project = await db.query.projects.findFirst({
+    where: eq(schema.projects.slug, site),
+    columns: { id: true, slug: true },
+  });
+  if (!project) return null;
+  const domains = await db
+    .select({ hostname: schema.domains.hostname })
+    .from(schema.domains)
+    .innerJoin(schema.services, eq(schema.services.id, schema.domains.serviceId))
+    .where(eq(schema.services.projectId, project.id));
+  if (domains.length > 0 && !domains.some((d) => sameSite(d.hostname, host))) return null;
+  return project;
+}
+
+/** Для webhook: сервис по id вместе с проектом (без сессии — подпись проверяется секретом). */
 export async function getServiceForHook(id: string): Promise<{ service: ServiceView; project: { id: string; slug: string } } | null> {
   const rows = await db.select().from(schema.services).where(eq(schema.services.id, id)).limit(1);
   if (!rows[0]) return null;

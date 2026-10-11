@@ -4,18 +4,10 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ComputerIcon, Globe02Icon, ReloadIcon, Time01Icon, WifiConnected01Icon } from "@hugeicons/core-free-icons";
-import { fmtTime, useMetric, type ApiData, type ContentData, type VisitorsData } from "@/lib/status";
+import { ComputerIcon, Globe02Icon, ReloadIcon, WifiConnected01Icon } from "@hugeicons/core-free-icons";
+import { fmtTime, useMetric, type ContentData, type VisitorsData } from "@/lib/status";
 import { useProject } from "@/lib/project-context";
-import { AnalyticsContentSkeleton, AnalyticsError, AnalyticsTrafficSkeleton } from "@/components/dashboard/analytics-states";
-import {
-  HostsList,
-  StatusCodes,
-  TopEndpoints,
-  TrafficCharts,
-  TrafficNotConfigured,
-  TrafficStats,
-} from "@/components/dashboard/analytics-traffic";
+import { AnalyticsContentSkeleton, AnalyticsError } from "@/components/dashboard/analytics-states";
 import { ArticlesByType, ContentStats, TopArticles } from "@/components/dashboard/analytics-content";
 import {
   BreakdownCard,
@@ -28,16 +20,16 @@ import {
 } from "@/components/dashboard/analytics-visitors";
 
 /**
- * Analytics Page
+ * Analytics Page — web analytics in the spirit of Vercel Web Analytics.
  *
- * Traffic block mirrors Vercel Analytics: totals for the collector window
- * (`window_hours`, normally 24h), hourly series, status code distribution,
- * top endpoints and hosts. Data comes from the status API (`/status/api`,
- * polled every 30s) — no mock data. When the access log is not configured
- * the traffic block collapses into a single notice.
+ * Visitors, page views, bounce rate, pages, referrers and device/browser/OS
+ * breakdowns come only from the Scalefield script (public/script.js →
+ * /api/collect → page_views). Nothing here depends on the proxy or on the
+ * server the project runs on: the site can live anywhere. Server traffic from
+ * the proxy access log lives on /monitoring.
  *
- * Content block (`/status/content`, polled every 60s) shows platform-wide
- * interaction totals, top articles and the publication type breakdown.
+ * Content block (`/status/content`) is project-specific (researcher.uz) and is
+ * shown only when the project has `contentMetrics` enabled.
  *
  * EXCEPTION: Using cards for statistics (Supabase-style)
  */
@@ -49,19 +41,18 @@ const RANGE_OPTIONS = [
 
 export default function AnalyticsPage() {
   const [range, setRange] = React.useState("7");
-  const { apiBase } = useProject();
+  const { apiBase, slug, contentMetrics } = useProject();
   const visitors = useMetric<VisitorsData>(`${apiBase}/analytics/visitors?days=${range}`, 60000);
-  const api = useMetric<ApiData>("api", 30000);
-  const content = useMetric<ContentData>("content", 60000);
+  // Счётчик ручного обновления: блок контента держит свой запрос сам и
+  // перечитывает его, когда счётчик меняется.
+  const [refreshKey, setRefreshKey] = React.useState(0);
 
-  const updatedAt = visitors.updatedAt ?? api.updatedAt ?? content.updatedAt;
-  const windowHours = api.data?.configured ? (api.data.window_hours ?? 24) : null;
-  const refreshing = api.loading || content.loading;
+  const updatedAt = visitors.updatedAt;
+  const refreshing = visitors.loading;
 
   const refresh = () => {
     visitors.refresh();
-    api.refresh();
-    content.refresh();
+    setRefreshKey((k) => k + 1);
   };
 
   return (
@@ -70,7 +61,7 @@ export default function AnalyticsPage() {
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6 sm:mb-8">
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold mb-1">Analytics</h1>
-          <p className="text-sm text-muted-foreground">Traffic, performance and content usage metrics</p>
+          <p className="text-sm text-muted-foreground">Visitors, pages and referrers from the Scalefield script</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Select value="production" onValueChange={() => {}}>
@@ -93,12 +84,6 @@ export default function AnalyticsPage() {
               ))}
             </SelectContent>
           </Select>
-          {windowHours != null ? (
-            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted text-foreground font-medium">
-              <HugeiconsIcon icon={Time01Icon} className="h-3.5 w-3.5" />
-              Last {windowHours}h
-            </span>
-          ) : null}
           <span className="whitespace-nowrap">{updatedAt ? `Updated ${fmtTime(updatedAt)}` : "Loading…"}</span>
           <Button
             size="sm"
@@ -117,25 +102,20 @@ export default function AnalyticsPage() {
       {/* Visitors */}
       <section className="mb-10">
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-4">Visitors · {RANGE_OPTIONS.find((o) => o.value === range)?.label.toLowerCase()}</h2>
-        <VisitorsSection state={visitors} />
+        <VisitorsSection state={visitors} site={slug} />
       </section>
 
-      {/* Traffic */}
-      <section className="mb-10">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-4">Traffic</h2>
-        <TrafficSection state={api} />
-      </section>
-
-      {/* Content */}
-      <section>
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-4">Content</h2>
-        <ContentSection state={content} />
-      </section>
+      {contentMetrics ? (
+        <section>
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-4">Content</h2>
+          <ContentBlock refreshKey={refreshKey} />
+        </section>
+      ) : null}
     </div>
   );
 }
 
-function VisitorsSection({ state }: { state: ReturnType<typeof useMetric<VisitorsData>> }) {
+function VisitorsSection({ state, site }: { state: ReturnType<typeof useMetric<VisitorsData>>; site: string }) {
   const { data, error, loading, refresh } = state;
 
   if (!data) {
@@ -143,17 +123,11 @@ function VisitorsSection({ state }: { state: ReturnType<typeof useMetric<Visitor
     return <AnalyticsError title="Visitor metrics unavailable" message={error ?? "Unknown error"} onRetry={refresh} />;
   }
 
-  if (!data.configured) return <VisitorsNotConfigured />;
+  if (!data.configured) return <VisitorsNotConfigured site={site} />;
 
   return (
     <div className="space-y-4">
       {error ? <AnalyticsError title="Latest refresh failed — showing previous data" message={error} onRetry={refresh} /> : null}
-      {data.source === "logs" && (
-        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-          Estimated from the server proxy log. Add the <code className="font-mono">&lt;Analytics /&gt;</code> tracker
-          to this project for exact, script-based numbers (also catches client-side route changes the log can&apos;t see).
-        </div>
-      )}
       <VisitorStats data={data} />
       <VisitorsChart series={data.series ?? []} days={data.window_days ?? 7} />
       <div className="grid gap-4 lg:grid-cols-2">
@@ -169,34 +143,18 @@ function VisitorsSection({ state }: { state: ReturnType<typeof useMetric<Visitor
   );
 }
 
-function TrafficSection({ state }: { state: ReturnType<typeof useMetric<ApiData>> }) {
-  const { data, error, loading, refresh } = state;
-
-  if (!data) {
-    if (loading) return <AnalyticsTrafficSkeleton />;
-    return <AnalyticsError title="Traffic metrics unavailable" message={error ?? "Unknown error"} onRetry={refresh} />;
-  }
-
-  if (!data.configured) return <TrafficNotConfigured />;
-
-  return (
-    <div className="space-y-6">
-      {error ? (
-        <AnalyticsError title="Latest refresh failed — showing previous data" message={error} onRetry={refresh} />
-      ) : null}
-      <TrafficStats api={data} />
-      <TrafficCharts series={data.series ?? []} />
-      <div className="grid gap-4 lg:grid-cols-2">
-        {data.status_codes ? <StatusCodes codes={data.status_codes} /> : null}
-        <HostsList hosts={data.by_host ?? []} />
-      </div>
-      <TopEndpoints endpoints={data.top_endpoints ?? []} />
-    </div>
-  );
-}
-
-function ContentSection({ state }: { state: ReturnType<typeof useMetric<ContentData>> }) {
-  const { data, error, loading, refresh } = state;
+/** Только для проектов с `contentMetrics`: без него ручка отвечает 404, и
+ * компонент не монтируется вовсе — запроса нет. */
+function ContentBlock({ refreshKey }: { refreshKey: number }) {
+  const { data, error, loading, refresh } = useMetric<ContentData>("content", 60000);
+  const first = React.useRef(true);
+  React.useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    refresh();
+  }, [refreshKey, refresh]);
 
   if (!data) {
     if (loading) return <AnalyticsContentSkeleton />;

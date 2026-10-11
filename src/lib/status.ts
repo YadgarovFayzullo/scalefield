@@ -141,11 +141,9 @@ export type VisitorsData = {
   series?: { day: number; visitors: number; views: number }[];
   top_pages?: { path: string; views: number; visitors: number }[];
   referrers?: { referrer: string; count: number }[];
-  referrer_capture_available?: boolean;
   devices?: { name: string; count: number }[];
   browsers?: { name: string; count: number }[];
   operating_systems?: { name: string; count: number }[];
-  source?: "script" | "logs";
 };
 
 export type SummaryData = {

@@ -1,18 +1,19 @@
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/db";
-import { getProjectByDomain } from "@/lib/services";
+import { resolveTrackedProject } from "@/lib/services";
 import { classifyUa, isBotUa, isServicePath } from "@/lib/ua";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Приёмник событий клиентского трекера (`<Analytics />`, см.
- * scalefield-analytics.tsx) — публичный, без сессии и без токена в коде
- * сайта: проект узнаётся по домену страницы, откуда пришёл маячок (Origin/
- * Referer запроса), точно как у Vercel Analytics компонент ничего не
- * настраивает, площадка узнаётся сама. Это не защита от подделки Origin
+ * Приёмник событий трекера — универсального `public/script.js` (одна строка
+ * на любом сайте) и React-компонента scalefield-analytics.tsx. Публичный, без
+ * сессии и без токена в коде сайта. Проект узнаётся по `site` из тела
+ * (атрибут `data-site` скрипта), а без него — по домену страницы, откуда
+ * пришёл маячок (Origin/Referer). Если у проекта заведены домены, маячок с
+ * чужого домена не принимается даже с верным `site`. Это не защита от подделки Origin
  * сервером — это идентификация, а не авторизация; данные аналитики не
  * секрет, и худшее, что можно сделать поддельным Origin, — исказить
  * собственную аналитику чужого проекта, а не прочитать чужие данные.
@@ -46,6 +47,10 @@ setInterval(() => {
 }, 5 * 60_000);
 
 function clientIp(req: NextRequest): string {
+  // За Cloudflare настоящий адрес — в cf-connecting-ip, x-forwarded-for там
+  // начинается с него же, но его можно дописать с клиента.
+  const cf = req.headers.get("cf-connecting-ip");
+  if (cf) return cf.trim();
   const fwd = req.headers.get("x-forwarded-for");
   if (fwd) return fwd.split(",")[0].trim();
   return req.headers.get("x-real-ip") || "0.0.0.0";
@@ -90,7 +95,7 @@ export async function POST(req: NextRequest) {
   const host = originHost(req);
   if (!host) return new NextResponse(null, { status: 204, headers });
 
-  let body: { path?: string; referrer?: string | null };
+  let body: { site?: string | null; path?: string; referrer?: string | null };
   try {
     const text = await req.text();
     body = JSON.parse(text);
@@ -101,7 +106,8 @@ export async function POST(req: NextRequest) {
   if (!path) return new NextResponse(null, { status: 204, headers });
   if (isServicePath(path)) return new NextResponse(null, { status: 204, headers });
 
-  const project = await getProjectByDomain(host);
+  const site = typeof body.site === "string" && body.site ? body.site.slice(0, 100) : null;
+  const project = await resolveTrackedProject(site, host);
   if (!project) return new NextResponse(null, { status: 204, headers });
 
   const day = Math.floor(Date.now() / 86_400_000);

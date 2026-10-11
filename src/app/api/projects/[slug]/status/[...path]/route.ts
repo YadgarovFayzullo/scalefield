@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
 //  - api/logs/visitors — только запросы к доменам проекта; нет доменов —
 //    «не настроено» (трафик на сервере различается только по домену);
 //  - container-logs — только контейнер проекта.
-const ALLOWED = new Set(["summary", "server", "database", "api", "content", "logs", "container-logs", "visitors"]);
+const ALLOWED = new Set(["summary", "server", "database", "api", "content", "logs", "container-logs"]);
 
 // Ключи, под которыми в ответе агента лежит список контейнеров хоста —
 // их нужно обрезать до контейнеров ЭТОГО проекта перед отдачей в браузер.
@@ -33,7 +33,7 @@ const CONTAINER_LIST_PATHS: Record<string, string[]> = {
 };
 
 // Разделы, которые на общем сервере различаются только по домену запроса.
-const BY_DOMAIN = new Set(["api", "logs", "visitors"]);
+const BY_DOMAIN = new Set(["api", "logs"]);
 
 function filterContainers(body: unknown, path: string[], belongs: (name: string) => boolean): unknown {
   if (body == null || typeof body !== "object") return body;

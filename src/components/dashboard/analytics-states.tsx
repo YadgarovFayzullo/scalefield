@@ -8,7 +8,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon, ReloadIcon } from "@hugeicons/core-free-icons";
 import { AnalyticsStatCardSkeleton } from "@/components/dashboard/analytics-stat-card";
 
-/** Error state for one data source (traffic or content) with a retry button. */
+/** Error state for one data source (visitors or content) with a retry button. */
 export function AnalyticsError({
   title,
   message,
@@ -46,29 +46,6 @@ export function AnalyticsChartSkeleton({ className }: { className?: string }) {
         <Skeleton className={className ?? "h-56 w-full"} />
       </CardContent>
     </Card>
-  );
-}
-
-/** Skeleton for the whole traffic section (stat row + charts + tables). */
-export function AnalyticsTrafficSkeleton() {
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
-        {Array.from({ length: 5 }, (_, i) => (
-          <AnalyticsStatCardSkeleton key={i} />
-        ))}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        {Array.from({ length: 4 }, (_, i) => (
-          <AnalyticsChartSkeleton key={i} />
-        ))}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <AnalyticsChartSkeleton className="h-32 w-full" />
-        <AnalyticsChartSkeleton className="h-32 w-full" />
-      </div>
-      <AnalyticsChartSkeleton className="h-64 w-full" />
-    </div>
   );
 }
 
