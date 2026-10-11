@@ -5,6 +5,7 @@ import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowUp02Icon, EyeIcon, GitBranchIcon, GitCommitIcon, MoreHorizontalIcon, Redo02Icon } from "@hugeicons/core-free-icons";
 import { fmtAgo, fmtDuration, type Deployment } from "@/lib/status";
+import { elapsedSeconds, useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 import { environmentOf, runState, STATE_CONFIG } from "./deployments-status";
 
@@ -31,6 +32,11 @@ export function DeploymentRow({ deployment: d, href, current = false }: { deploy
   const env = environmentOf(d);
   const isAgentDeploy = d.source === "scalefield";
   const isRedeploy = isAgentDeploy && d.workflow === "deploy";
+  // У идущего деплоя длительности ещё нет — показываем, сколько он уже идёт,
+  // и обновляем раз в секунду, как Vercel; завершённые берут duration_s.
+  const live = state === "in_progress" || state === "queued";
+  const now = useNow(live);
+  const seconds = live ? elapsedSeconds(d.created_at, now) : d.duration_s;
 
   return (
     <Link
@@ -44,7 +50,7 @@ export function DeploymentRow({ deployment: d, href, current = false }: { deploy
       <span className="hidden items-center gap-2 sm:flex">
         <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", DOT_COLOR[state])} />
         <span className="text-sm">{config.label}</span>
-        <span className="text-sm text-muted-foreground">{fmtDuration(d.duration_s)}</span>
+        <span className="text-sm tabular-nums text-muted-foreground">{fmtDuration(seconds)}</span>
       </span>
 
       {/* Синим — только то, что сейчас живое в проде; прошлые прод-деплои — нейтрально. */}

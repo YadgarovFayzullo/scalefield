@@ -9,6 +9,7 @@ import { AlertCircleIcon, ArrowLeft01Icon, GlobalIcon, LinkSquare02Icon, RocketI
 import { buttonVariants } from "@/components/ui/button";
 import { useProject } from "@/lib/project-context";
 import { fmtAgo, fmtDuration, type Deployment } from "@/lib/status";
+import { elapsedSeconds, useNow } from "@/lib/use-now";
 import { api } from "@/lib/tables";
 import { DeploymentStatusBadge, environmentOf, runState, shortRepo } from "@/components/dashboard/deployments-status";
 import { cn } from "@/lib/utils";
@@ -125,6 +126,9 @@ function DeploymentDetail({ deployment, lines }: { deployment: Deployment; lines
   const isAgentDeploy = deployment.source === "scalefield";
   const failed = state === "failure";
   const live = isAgentDeploy && deployment.status !== "completed";
+  // Длительность тикает у любого незавершённого деплоя, включая GitHub Actions.
+  const ticking = deployment.status !== "completed";
+  const now = useNow(ticking);
   const errorLine = failed ? lastLogLine(lines.join("\n")) : null;
 
   return (
@@ -172,7 +176,9 @@ function DeploymentDetail({ deployment, lines }: { deployment: Deployment; lines
           <span className="block text-xs text-muted-foreground">{fmtAgo(deployment.created_at)}</span>
         </Field>
         <Field label="Status">{deployment.status}</Field>
-        <Field label="Duration">{fmtDuration(deployment.duration_s)}</Field>
+        <Field label="Duration">
+          <span className="tabular-nums">{fmtDuration(ticking ? elapsedSeconds(deployment.created_at, now) : deployment.duration_s)}</span>
+        </Field>
         <Field label="Environment">
           <span
             className={cn(
@@ -242,18 +248,12 @@ function lineTone(line: string): string {
 function LiveLog({ lines, live, failed, startedAt }: { lines: string[]; live: boolean; failed: boolean; startedAt: string }) {
   const boxRef = React.useRef<HTMLDivElement>(null);
   const followRef = React.useRef(true);
-  const [now, setNow] = React.useState(() => Date.now());
+  const now = useNow(live);
   const clean = React.useMemo(() => lines.map((l) => l.replace(ANSI_RE, "")), [lines]);
   const steps = React.useMemo(
     () => clean.flatMap((l, i) => (l.startsWith("==> ") ? [{ i, name: l.slice(4) }] : [])),
     [clean],
   );
-
-  React.useEffect(() => {
-    if (!live) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [live]);
 
   React.useLayoutEffect(() => {
     const box = boxRef.current;
@@ -273,7 +273,7 @@ function LiveLog({ lines, live, failed, startedAt }: { lines: string[]; live: bo
     }
   };
 
-  const elapsed = Math.max(0, Math.round((now - new Date(startedAt).getTime()) / 1000));
+  const elapsed = elapsedSeconds(startedAt, now);
 
   return (
     <div className="rounded-xl border border-border p-5">
