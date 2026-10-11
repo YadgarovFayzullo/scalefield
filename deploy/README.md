@@ -73,9 +73,19 @@ control-plane: `RELAY_PUBLIC_URL` (адрес relay глазами клиент�
 (`agent_token_hash`). После подключения в `servers` появляются
 `agent_version`, `agent_hostname`, `last_seen_at`.
 
-Образ агента должен быть доступен серверу клиента: пока реестра нет, на
-Timeweb он переносится `docker save | ssh docker load` под именем из
-`AGENT_IMAGE` (скрипт делает `pull`, а при неудаче берёт локальную копию).
+Образ агента должен быть доступен серверу клиента из ПУБЛИЧНОГО реестра:
+workflow `.github/workflows/agent-image.yml` на каждый push в `agent/`
+собирает его под amd64 и arm64 и публикует
+`ghcr.io/yadgarovfayzullo/scalefield-agent:latest` (+ тег с sha) — это и
+есть `AGENT_IMAGE`. Пакет уже публичный (проверено 11.10.2026 анонимным
+`pull` манифеста: amd64 + arm64); если когда-нибудь станет приватным —
+переключить в настройках пакета на GitHub. До 11.10.2026
+в проде стояло `AGENT_IMAGE=status-api:latest` (локальное имя образа на
+Timeweb) — установка на любой чужой сервер падала на `pull access denied`.
+Скрипт при неудачном `pull` берёт локальную копию, только если она есть
+(наш же хост после `docker load`), иначе останавливается с объяснением.
+Собственный агент Timeweb в `deploy/docker-compose.yml` по-прежнему
+`status-api:latest` и от `AGENT_IMAGE` не зависит.
 
 ## Деплой сервисов через панель
 
