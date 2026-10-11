@@ -33,6 +33,19 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
         run: echo "image=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/scalefield-agent" >> "$GITHUB_OUTPUT"
+      # Дымовая проверка ДО публикации: 11.10 в GHCR уехал образ, падавший на
+      # старте с ModuleNotFoundError (main.py импортировал удалённый модуль), и
+      # агент клиента крутился в Restarting. Собираем amd64 в локальный docker и
+      # импортируем приложение — слои уйдут в кэш и переиспользуются ниже.
+      - uses: docker/build-push-action@v6
+        with:
+          context: agent
+          platforms: linux/amd64
+          load: true
+          tags: scalefield-agent:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: docker run --rm scalefield-agent:smoke python -c "import app.main; print('app.main imports OK')"
       - uses: docker/build-push-action@v6
         with:
           context: agent
