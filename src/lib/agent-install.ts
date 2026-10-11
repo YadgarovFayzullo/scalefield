@@ -184,6 +184,13 @@ SCALEFIELD_EOF
 
 main() {
   log "Scalefield agent install on $(hostname) ($(uname -sm))"
+  # Ссылку легко вставить не в тот терминал: на маке с Docker Desktop скрипт
+  # успевал положить SSH-ключ в authorized_keys root и создать /opt/apps,
+  # прежде чем упасть на «mounts denied». Сервер клиента — только Linux.
+  if [ "$(uname -s)" != "Linux" ]; then
+    echo "ERROR: this looks like $(uname -s) — run the command on the server you are adding (a Linux VPS), not on your own computer." >&2
+    exit 1
+  fi
   if [ "$(id -u)" != "0" ]; then
     echo "ERROR: the install must run as root" >&2
     exit 1
