@@ -1,0 +1,45 @@
+# Образ агента для серверов клиентов. Скрипт установки (src/lib/agent-install.ts)
+# делает `docker compose pull` образа из AGENT_IMAGE — на чужом сервере нет ни
+# нашего локального `status-api:latest`, ни логина в реестр, поэтому образ
+# обязан лежать в ПУБЛИЧНОМ реестре. Собираем под amd64 и arm64 (Hetzner Ampere,
+# Oracle Free Tier — arm). Пакет ghcr.io/<owner>/scalefield-agent создаётся
+# приватным при первом пуше из приватного репозитория — переключить на Public
+# один раз руками: github.com/users/<owner>/packages/container/scalefield-agent/settings.
+name: agent-image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent/**"
+      - ".github/workflows/agent-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        run: echo "image=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/scalefield-agent" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: agent
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:latest
+            ${{ steps.meta.outputs.image }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

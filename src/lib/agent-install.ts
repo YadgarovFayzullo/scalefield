@@ -250,7 +250,18 @@ SCALEFIELD_EOF
 
   log "Starting the agent (${p.agentImage})"
   cd '${p.installRoot}'
-  docker compose pull --quiet 2>/dev/null || log "Image not pulled — using a local copy if present"
+  # На сервере клиента образ берётся только из реестра; локальная копия —
+  # случай нашего же хоста, где он загружен через docker load. Без того и другого
+  # up упал бы невнятным «pull access denied» — говорим, что именно не так.
+  if ! docker compose pull --quiet 2>/dev/null; then
+    if docker image inspect '${p.agentImage}' >/dev/null 2>&1; then
+      log "Image not pulled — using the local copy of ${p.agentImage}"
+    else
+      log "ERROR: cannot pull ${p.agentImage} and there is no local copy."
+      log "The agent image must be in a public registry (AGENT_IMAGE on the control plane)."
+      exit 1
+    fi
+  fi
   docker compose up -d --remove-orphans
   docker compose ps --format '{{.Name}} {{.Status}}'
   log "Agent started — waiting for it to connect to the relay"
