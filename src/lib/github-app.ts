@@ -359,6 +359,10 @@ export type RepoInsights = {
   /** Имена workflow GitHub Actions — кандидаты для «Wait for CI workflow». */
   workflows: string[];
   hasDockerfile: boolean;
+  /** Порт из последней строки `EXPOSE` Dockerfile — что слушает приложение. */
+  exposedPort: number | null;
+  /** Фреймворк/стек по файлам корня и зависимостям package.json («Next.js», «Python», …). */
+  framework: string | null;
   /** Скрипт деплоя в репозитории (scripts/deploy.sh, deploy.sh) — признак своего стека. */
   deployScript: string | null;
   composeFiles: string[];
@@ -374,6 +378,68 @@ const COMPOSE_FILES = ["docker-compose.prod.yml", "docker-compose.production.yml
  * Ошибки отдельных запросов не валят ответ: нет права Actions — просто нет
  * списка workflow.
  */
+/** Мета-фреймворки по зависимостям package.json — определяют стек сами по себе. */
+const NODE_FRAMEWORKS: [string, string][] = [
+  ["next", "Next.js"],
+  ["nuxt", "Nuxt"],
+  ["@sveltejs/kit", "SvelteKit"],
+  ["astro", "Astro"],
+  ["@remix-run/react", "Remix"],
+  ["@angular/core", "Angular"],
+  ["@nestjs/core", "NestJS"],
+];
+/** Сборщик или сервер — слабый признак: vite в devDependencies есть и у Laravel, и у Django-проектов. */
+const NODE_TOOLS: [string, string][] = [
+  ["vite", "Vite"],
+  ["express", "Express"],
+  ["fastify", "Fastify"],
+];
+/** Стек по файлу в корне, когда package.json нет. */
+const ROOT_MARKERS: [string, string][] = [
+  ["pyproject.toml", "Python"],
+  ["requirements.txt", "Python"],
+  ["Pipfile", "Python"],
+  ["go.mod", "Go"],
+  ["composer.json", "PHP"],
+  ["Cargo.toml", "Rust"],
+  ["Gemfile", "Ruby"],
+  ["index.html", "Static"],
+];
+
+function detectFramework(packageJson: string | null, files: Set<string>): string | null {
+  let deps: Record<string, string> | null = null;
+  if (packageJson) {
+    try {
+      const pkg = JSON.parse(packageJson) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+      deps = { ...(pkg.devDependencies ?? {}), ...(pkg.dependencies ?? {}) };
+    } catch {
+      /* битый package.json — смотрим на файлы корня */
+    }
+  }
+  if (deps) for (const [dep, name] of NODE_FRAMEWORKS) if (dep in deps) return name;
+  // package.json без мета-фреймворка часто лежит в корне ради линтеров или
+  // фронтовой сборки у Python/Go/PHP-проекта — маркеры других стеков важнее.
+  for (const [file, name] of ROOT_MARKERS) if (name !== "Static" && files.has(file)) return name;
+  if (deps) {
+    for (const [dep, name] of NODE_TOOLS) if (dep in deps) return name;
+    return "Node.js";
+  }
+  return files.has("index.html") ? "Static" : null;
+}
+
+/** Порт из последней инструкции EXPOSE (первый из перечисленных, без /tcp). */
+export function parseExposedPort(dockerfile: string): number | null {
+  let port: number | null = null;
+  for (const line of dockerfile.split(/\r?\n/)) {
+    const m = /^\s*EXPOSE\s+(\d{1,5})(?:\/\w+)?(?:\s|$)/i.exec(line);
+    if (m) {
+      const n = Number(m[1]);
+      if (n >= 1 && n <= 65535) port = n;
+    }
+  }
+  return port;
+}
+
 export async function repoInsights(orgId: string, repo: string): Promise<RepoInsights> {
   const token = await tokenForRepo(orgId, repo);
   const headers = token ? { ...HEADERS, Authorization: `Bearer ${token}` } : HEADERS;
@@ -383,22 +449,34 @@ export async function repoInsights(orgId: string, repo: string): Promise<RepoIns
   };
   const meta = await get<{ full_name: string; default_branch: string }>("");
   if (!meta) throw new Error("Repository not found or the GitHub App has no access to it");
+  const ref = encodeURIComponent(meta.default_branch);
   const [branches, workflows, root, scripts] = await Promise.all([
     get<{ name: string }[]>("/branches?per_page=100"),
     get<{ workflows: { name: string; state: string }[] }>("/actions/workflows?per_page=100"),
-    get<{ name: string; type: string }[]>(`/contents/?ref=${encodeURIComponent(meta.default_branch)}`),
-    get<{ name: string; type: string }[]>(`/contents/scripts?ref=${encodeURIComponent(meta.default_branch)}`),
+    get<{ name: string; type: string }[]>(`/contents/?ref=${ref}`),
+    get<{ name: string; type: string }[]>(`/contents/scripts?ref=${ref}`),
   ]);
   const files = new Set([
     ...(root ?? []).filter((f) => f.type === "file").map((f) => f.name),
     ...(scripts ?? []).filter((f) => f.type === "file").map((f) => `scripts/${f.name}`),
   ]);
+  // Содержимое читаем только у файлов, которые есть в корне: Dockerfile ради
+  // EXPOSE (порт в форму), package.json ради фреймворка. Contents API отдаёт
+  // base64 до 1 МБ — для этих двух файлов хватает.
+  const text = async (name: string): Promise<string | null> => {
+    if (!files.has(name)) return null;
+    const f = await get<{ content?: string; encoding?: string }>(`/contents/${name}?ref=${ref}`);
+    return f?.content && f.encoding === "base64" ? Buffer.from(f.content, "base64").toString("utf8") : null;
+  };
+  const [dockerfileText, packageJson] = await Promise.all([text("Dockerfile"), text("package.json")]);
   return {
     fullName: meta.full_name,
     defaultBranch: meta.default_branch || "main",
     branches: (branches ?? []).map((b) => b.name),
     workflows: (workflows?.workflows ?? []).filter((w) => w.state === "active").map((w) => w.name),
     hasDockerfile: files.has("Dockerfile"),
+    exposedPort: dockerfileText ? parseExposedPort(dockerfileText) : null,
+    framework: detectFramework(packageJson, files),
     deployScript: DEPLOY_SCRIPTS.find((p) => files.has(p)) ?? null,
     composeFiles: COMPOSE_FILES.filter((p) => files.has(p)),
   };

@@ -18,6 +18,11 @@ type ImportBody = {
   domain?: string;
   env?: Record<string, string>;
   deploy?: boolean;
+  /** Из repo-info: свой скрипт деплоя → script, иначе образ. */
+  deployMode?: "image" | "script";
+  appDir?: string | null;
+  deployCommand?: string | null;
+  workflow?: string | null;
 };
 
 /**
@@ -65,6 +70,10 @@ export async function POST(req: NextRequest) {
       autoDeploy: true,
       env,
       buildEnv,
+      deployMode: body.deployMode === "script" ? "script" : "image",
+      appDir: body.deployMode === "script" ? (body.appDir || "").trim() || null : null,
+      deployCommand: body.deployMode === "script" ? (body.deployCommand || "").trim() || null : null,
+      workflow: (body.workflow || "").trim() || null,
     });
 
     // Первая сборка — если сервер выбран; её ошибка не отменяет импорт

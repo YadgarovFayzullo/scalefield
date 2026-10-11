@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/tables";
 import { fmtAgo } from "@/lib/format";
-import type { RepoView } from "@/lib/github-app";
+import type { RepoInsights, RepoView } from "@/lib/github-app";
 import { parseEnvText } from "@/lib/tables";
 import { EnvInput } from "./env-input";
 
@@ -16,7 +16,8 @@ type ServerOption = { id: string; name: string; online: boolean };
 
 /**
  * Импорт репозитория: список репозиториев установок GitHub App команды с
- * поиском → форма (имя, сервер, ветка, Dockerfile, порт, домен, env) → проект с
+ * поиском → форма (имя, сервер, ветка, домен, env; Dockerfile/порт/CI под Advanced,
+ * подставляются из репозитория через repo-info) → проект с
  * первой сборкой. Нет установки — кнопка «Install GitHub App» с возвратом сюда.
  */
 export function ImportRepository({ servers }: { servers: ServerOption[] }) {
@@ -108,6 +109,15 @@ export function ImportRepository({ servers }: { servers: ServerOption[] }) {
   );
 }
 
+type Insights = { state: "loading" } | { state: "ready"; info: RepoInsights } | { state: "error"; message: string };
+
+/**
+ * Настройка проекта после выбора репозитория. Как Vercel при импорте: сразу
+ * идём за `repo-info` и подставляем то, что видно в репозитории — ветку по
+ * умолчанию, порт из `EXPOSE` Dockerfile, режим деплоя (свой скрипт →
+ * script), единственный CI-workflow. Dockerfile и порт — под «Advanced»:
+ * сборке они нужны редко (без Dockerfile стек определяет Railpack).
+ */
 function ConfigureProject({
   repo,
   servers,
@@ -126,8 +136,40 @@ function ConfigureProject({
   const [port, setPort] = React.useState("3000");
   const [domain, setDomain] = React.useState("");
   const [env, setEnv] = React.useState("");
+  const [deployMode, setDeployMode] = React.useState<"image" | "script">("image");
+  const [appDir, setAppDir] = React.useState("");
+  const [deployCommand, setDeployCommand] = React.useState("");
+  const [workflow, setWorkflow] = React.useState("");
+  const [insights, setInsights] = React.useState<Insights>({ state: "loading" });
+  const [advanced, setAdvanced] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    api<{ repo: RepoInsights }>(`/api/github/repo-info?repo=${encodeURIComponent(repo.fullName)}`)
+      .then(({ repo: info }) => {
+        if (cancelled) return;
+        setInsights({ state: "ready", info });
+        setBranch(info.defaultBranch);
+        if (info.exposedPort) setPort(String(info.exposedPort));
+        if (info.deployScript) {
+          setDeployMode("script");
+          setDeployCommand(`bash ${info.deployScript}`);
+          setAppDir(slugify(repo.name));
+        }
+        if (info.workflows.length === 1) setWorkflow(info.workflows[0]);
+      })
+      .catch((e) => {
+        // Нет доступа к содержимому — форма работает на умолчаниях, как раньше.
+        if (!cancelled) setInsights({ state: "error", message: e instanceof Error ? e.message : String(e) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repo.fullName, repo.name]);
+
+  const info = insights.state === "ready" ? insights.info : null;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -136,7 +178,20 @@ function ConfigureProject({
     try {
       const res = await api<{ project: { slug: string }; deployError: string | null }>("/api/projects", {
         method: "POST",
-        body: JSON.stringify({ name, repo: repo.fullName, branch, serverId: serverId || null, dockerfile: dockerfile.trim() || "Dockerfile", port: Number(port) || null, domain, env: parseEnvText(env) }),
+        body: JSON.stringify({
+          name,
+          repo: repo.fullName,
+          branch,
+          serverId: serverId || null,
+          dockerfile: dockerfile.trim() || "Dockerfile",
+          port: Number(port) || null,
+          domain,
+          env: parseEnvText(env),
+          deployMode,
+          appDir: deployMode === "script" ? appDir.trim() || null : null,
+          deployCommand: deployMode === "script" ? deployCommand.trim() || null : null,
+          workflow: workflow.trim() || null,
+        }),
       });
       if (res.deployError) alert(`Project created, but the first build did not start: ${res.deployError}`);
       onDone(res.project.slug);
@@ -154,8 +209,36 @@ function ConfigureProject({
     </label>
   );
 
+  // Что нашли в репозитории — одной строкой, как «Framework Preset» у Vercel.
+  const detected = info
+    ? [
+        info.framework,
+        info.hasDockerfile ? (info.exposedPort ? `Dockerfile (EXPOSE ${info.exposedPort})` : "Dockerfile") : null,
+        info.deployScript ? `deploy script ${info.deployScript}` : null,
+        info.composeFiles.length > 0 ? info.composeFiles.join(", ") : null,
+        info.workflows.length > 0 ? `${info.workflows.length} CI workflow${info.workflows.length > 1 ? "s" : ""}` : null,
+      ].filter(Boolean)
+    : [];
+  const buildHint = info
+    ? info.hasDockerfile
+      ? `Built with ${dockerfile.trim() || "Dockerfile"} from the repository.`
+      : "No Dockerfile — Railpack detects the stack and the app gets $PORT."
+    : "Built with the Dockerfile if the repository has one; otherwise Railpack detects the stack.";
+  const advancedCount = [dockerfile.trim() !== "Dockerfile", port !== (info?.exposedPort ? String(info.exposedPort) : "3000"), workflow.trim() !== ""].filter(Boolean).length;
+
   return (
     <form onSubmit={submit} className="space-y-4 rounded-xl border border-border p-5">
+      <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
+        {insights.state === "loading" && <span className="text-muted-foreground">Looking at the repository…</span>}
+        {insights.state === "error" && <span className="text-muted-foreground">Couldn&apos;t read the repository ({insights.message}) — using defaults.</span>}
+        {info && (
+          <>
+            <span className="font-medium">Detected:</span>{" "}
+            {detected.length > 0 ? detected.join(" · ") : "no Dockerfile or deploy script — Railpack will detect the stack on build"}
+          </>
+        )}
+      </div>
+
       {field("Project name", null, <Input value={name} onChange={(e) => setName(e.target.value)} required />)}
       {servers.length === 0 ? (
         <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
@@ -179,11 +262,32 @@ function ConfigureProject({
           </select>,
         )
       )}
-      <div className="grid gap-4 sm:grid-cols-3">
-        {field("Branch", "Pushes here redeploy.", <Input value={branch} onChange={(e) => setBranch(e.target.value)} required />)}
-        {field("Dockerfile", "Optional — without it the stack is detected automatically.", <Input value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} placeholder="Dockerfile" />)}
-        {field("Port", "The app listens on.", <Input value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" />)}
-      </div>
+
+      <datalist id="import-branches">
+        {(info?.branches ?? []).map((b) => (
+          <option key={b} value={b} />
+        ))}
+      </datalist>
+      {field("Branch", "Pushes here redeploy.", <Input value={branch} onChange={(e) => setBranch(e.target.value)} list="import-branches" required />)}
+
+      {info?.deployScript &&
+        field(
+          "How to deploy",
+          deployMode === "script"
+            ? "The agent puts the commit's code into /opt/apps/<app directory> and runs the script with a live log."
+            : buildHint,
+          <select value={deployMode} onChange={(e) => setDeployMode(e.target.value as "image" | "script")} className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm">
+            <option value="script">Run the repo&apos;s deploy script ({info.deployScript})</option>
+            <option value="image">Build an image ({info.hasDockerfile ? "Dockerfile" : "auto-detected stack"})</option>
+          </select>,
+        )}
+      {deployMode === "script" && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {field("App directory", "/opt/apps/<name> on the server", <Input value={appDir} onChange={(e) => setAppDir(e.target.value)} placeholder={slugify(repo.name)} required />)}
+          {field("Deploy command", "Runs in the app directory.", <Input value={deployCommand} onChange={(e) => setDeployCommand(e.target.value)} placeholder="bash scripts/deploy.sh" required />)}
+        </div>
+      )}
+
       {field(
         "Domain (optional)",
         "Point its DNS A record at the server; Traefik issues the certificate.",
@@ -194,6 +298,51 @@ function ConfigureProject({
         "KEY=VALUE per line, or upload your .env. Stored encrypted; available at runtime, NEXT_PUBLIC_* also at build time.",
         <EnvInput value={env} onChange={setEnv} placeholder={"DATABASE_URL=postgres://…\nNEXT_PUBLIC_API_URL=https://api.example.com"} />,
       )}
+
+      <section className="rounded-md border border-border">
+        <button type="button" onClick={() => setAdvanced((v) => !v)} className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium">
+          <span>
+            Advanced
+            {advancedCount > 0 && <span className="ml-2 font-normal text-muted-foreground">{advancedCount} changed</span>}
+          </span>
+          <span className="text-muted-foreground">{advanced ? "▲" : "▼"}</span>
+        </button>
+        {advanced && (
+          <div className="space-y-4 border-t border-border p-3">
+            {deployMode === "image" && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {field("Dockerfile", buildHint, <Input value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} placeholder="Dockerfile" />)}
+                {field(
+                  "Port",
+                  info?.exposedPort
+                    ? `From EXPOSE in the Dockerfile. Traefik routes the domain here.`
+                    : info && !info.hasDockerfile
+                      ? "Passed to the app as $PORT; Traefik routes the domain here."
+                      : "The app listens on; Traefik routes the domain here.",
+                  <Input value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" />,
+                )}
+              </div>
+            )}
+            {field(
+              "Wait for CI workflow",
+              "Auto-deploy starts when this GitHub Actions workflow succeeds on the branch instead of on the push itself.",
+              info && info.workflows.length > 0 ? (
+                <select value={workflow} onChange={(e) => setWorkflow(e.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm">
+                  <option value="">(deploy on push, don&apos;t wait)</option>
+                  {info.workflows.map((w) => (
+                    <option key={w} value={w}>
+                      {w}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input value={workflow} onChange={(e) => setWorkflow(e.target.value)} placeholder="(deploy on push)" />
+              ),
+            )}
+          </div>
+        )}
+      </section>
+
       {error && <p className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-sm text-destructive">{error}</p>}
       <div className="flex justify-between">
         <Button type="button" variant="outline" onClick={onBack} disabled={busy}>
@@ -204,5 +353,16 @@ function ConfigureProject({
         </Button>
       </div>
     </form>
+  );
+}
+
+/** Имя папки /opt/apps/<name> из имени репозитория — те же правила, что у NAME_RE сервиса. */
+function slugify(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^[-_]+|[-_]+$/g, "")
+      .slice(0, 60) || "app"
   );
 }
