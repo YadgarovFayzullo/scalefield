@@ -80,6 +80,9 @@ class DeployError(Exception):
     pass
 
 
+PORT_IN_USE_RE = re.compile(r"failed to bind host port [^:]*:(\d+)/\w+: address already in use")
+
+
 def _check_name(value: str, what: str) -> str:
     if not NAME_RE.match(value):
         raise DeployError(f"invalid {what}: {value!r}")
@@ -191,7 +194,24 @@ async def deploy(spec: DeploySpec, log: LogFn, pull: bool = True) -> dict:
         cmd += ["--pull", "always"]
     cmd.append(spec.service)
     log(f"$ {' '.join(cmd)}")
-    code = await run_streaming(cmd, path.parent, log, COMPOSE_TIMEOUT_S)
+    seen: list[str] = []
+
+    def tee(line: str) -> None:
+        seen.append(line)
+        log(line)
+
+    code = await run_streaming(cmd, path.parent, tee, COMPOSE_TIMEOUT_S)
+    if code != 0:
+        # Сырой «failed to bind host port … address already in use» от Docker не
+        # говорит, что делать. Порт на хосте занят обычно старой выкладкой того же
+        # приложения (pm2, systemd, nginx) — подсказываем сменить порт сервиса.
+        taken = next((m.group(1) for line in seen for m in [PORT_IN_USE_RE.search(line)] if m), None)
+        if taken:
+            log(
+                f"ERROR: port {taken} on this server is already taken by another process "
+                f"(the old deployment of this app under pm2/systemd, or another service). "
+                f"Set a free port for the service in Scalefield and redeploy, or stop that process."
+            )
     container = _container_state(_container_name(spec.project, spec.service))
     if container:
         log(f"container {container['name']}: {container['status']}")

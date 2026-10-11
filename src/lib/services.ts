@@ -495,6 +495,11 @@ export async function syncDeployment(projectSlug: string, row: DeploymentRow): P
       .update(schema.services)
       .set({ image: job.result?.image ?? row.image ?? undefined, container: job.result?.container?.name ?? `${projectSlug}-${(row.title ?? "").split(" ")[0]}` })
       .where(eq(schema.services.id, row.serviceId));
+  } else if (done && row.serviceId && job.kind === "build" && job.result?.stage === "deploy" && row.image) {
+    // Сборка из Git прошла, упал только запуск контейнера (например, занят порт
+    // на хосте): образ уже лежит на сервере, и «Redeploy» должен поднимать его,
+    // а не требовать новой сборки. Контейнер не трогаем — его нет.
+    await db.update(schema.services).set({ image: row.image }).where(eq(schema.services.id, row.serviceId));
   }
   return updated;
 }

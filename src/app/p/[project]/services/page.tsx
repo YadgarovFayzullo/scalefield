@@ -157,6 +157,9 @@ function ServiceCard({
   onRemove: () => void;
 }) {
   const [image, setImage] = React.useState(s.image ?? "");
+  // Поле «другой образ» спрятано: в него вписывали слово redeploy и получали
+  // «pull access denied for redeploy». Основная кнопка берёт образ сервиса.
+  const [otherImage, setOtherImage] = React.useState(false);
   const [ref, setRef] = React.useState(s.branch ?? "main");
   const [active, setActive] = React.useState<Deployment | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -283,19 +286,41 @@ function ServiceCard({
             </>
           ) : (
             <>
-              <Input className="h-8 w-80 font-mono text-xs" placeholder="image:tag to deploy" value={image} onChange={(e) => setImage(e.target.value)} />
-              <Button size="sm" onClick={() => void start("deploy", { image: image.trim() })} disabled={busy || !image.trim()}>
-                <HugeiconsIcon icon={RocketIcon} className={busy ? "animate-pulse" : undefined} />
-                {busy ? "Working…" : c ? "Redeploy" : "Deploy"}
-              </Button>
+              {s.image && !otherImage ? (
+                // Образ уже есть (собран из Git или задеплоен): поднимаем именно его.
+                <Button size="sm" onClick={() => void start("deploy", { image: s.image })} disabled={busy} title={s.image}>
+                  <HugeiconsIcon icon={RocketIcon} className={busy ? "animate-pulse" : undefined} />
+                  {busy ? "Working…" : c ? "Redeploy" : "Deploy"}
+                </Button>
+              ) : (
+                <>
+                  <Input
+                    className="h-8 w-80 font-mono text-xs"
+                    placeholder="ghcr.io/org/app:1.2.3"
+                    aria-label="Image to deploy"
+                    value={image}
+                    onChange={(e) => setImage(e.target.value)}
+                    autoFocus={otherImage}
+                  />
+                  <Button size="sm" onClick={() => void start("deploy", { image: image.trim() })} disabled={busy || !image.trim()}>
+                    <HugeiconsIcon icon={RocketIcon} className={busy ? "animate-pulse" : undefined} />
+                    {busy ? "Working…" : "Deploy image"}
+                  </Button>
+                </>
+              )}
               {s.repo && (
                 <>
                   <span className="mx-1 text-xs text-muted-foreground">or</span>
                   <Input className="h-8 w-32 font-mono text-xs" placeholder="branch" value={ref} onChange={(e) => setRef(e.target.value)} />
-                  <Button size="sm" variant="outline" onClick={() => void start("build", { ref: ref.trim() })} disabled={busy || !ref.trim()}>
+                  <Button size="sm" variant={s.image ? "outline" : "default"} onClick={() => void start("build", { ref: ref.trim() })} disabled={busy || !ref.trim()}>
                     Build from Git
                   </Button>
                 </>
+              )}
+              {s.image && (
+                <Button size="sm" variant="ghost" className="text-xs text-muted-foreground" onClick={() => setOtherImage((v) => !v)} disabled={busy}>
+                  {otherImage ? "Cancel" : "Another image…"}
+                </Button>
               )}
             </>
           )}
